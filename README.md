@@ -70,3 +70,7 @@ success = download_manager.download_m3u8_video(url, output_dir, title)
 ## 许可证
 
 本项目采用MIT许可证。
+
+## 免责声明
+
+本项目仅供学习与研究使用，请勿用于其他用途。
