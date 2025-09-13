@@ -6,6 +6,7 @@ API相关功能模块
 import requests
 import json
 import urllib3
+import re
 from typing import Dict, Any, List
 
 from ..core.config import Config
@@ -93,6 +94,37 @@ class APIClient:
             print(f"错误类型: {type(e).__name__}")
             return {}
 
+    def extract_title_from_description(self, description: str) -> str:
+        """
+        从description中提取标题内容（与DataProcessor保持一致）
+
+        Args:
+            description (str): 完整的描述文本
+
+        Returns:
+            str: 提取的标题
+        """
+        if not description:
+            return ""
+
+        # 方法1: 提取【】开头到第一个 # 或者特定关键词之前的内容
+        pattern1 = r'【[^】]+】([^#]+?)(?:\s*#|\s*$)'
+        match1 = re.search(pattern1, description)
+        if match1:
+            title = match1.group(0).strip()
+            title = re.sub(r'\s*#.*$', '', title).strip()
+            return title
+
+        # 方法2: 如果没有【】格式，提取第一个#之前的内容
+        pattern2 = r'^([^#]+?)(?:\s*#|$)'
+        match2 = re.search(pattern2, description)
+        if match2:
+            title = match2.group(1).strip()
+            return title
+
+        # 方法3: 如果都没有匹配，返回前100个字符
+        return description[:100] + "..." if len(description) > 100 else description
+
     def process_posts_data(self, data: Dict[str, Any]) -> None:
         """
         处理从API获取的posts数据
@@ -117,7 +149,12 @@ class APIClient:
 
         print(f"\n前3条记录的标题:")
         for i, item in enumerate(items[:3], 1):
-            title = item.get('title', 'No title')
+            # 使用与其他模式一致的标题提取方法
+            description = item.get('description', '')
+            title = self.extract_title_from_description(description)
+            if not title:
+                title = item.get('title', 'No title')
+
             likes = item.get('likes_count', 0)
             comments = item.get('comments_count', 0)
             print(f"{i}. {title} (👍{likes} 💬{comments})")

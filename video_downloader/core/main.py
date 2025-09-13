@@ -146,17 +146,38 @@ class VideoDownloaderApp:
         api_data = self.api_client.fetch_posts_from_api(size, verify_ssl=verify_ssl)
 
         if api_data:
+            # 显示API数据概览
             self.api_client.process_posts_data(api_data)
             print("✅ API数据获取完成")
 
-            extract_choice = input("\n是否提取视频数据并下载? (y/n, 默认n): ").strip().lower()
-            if extract_choice == 'y':
+            # 询问用户是否要进一步处理数据
+            process_choice = input("\n请选择后续操作:\n1. 提取视频数据并显示列表\n2. 仅保存原始API数据\n3. 退出\n请输入选择 (1/2/3, 默认1): ").strip() or "1"
+
+            if process_choice == "1":
+                # 提取视频数据
                 extracted_items = self.data_processor.extract_items_data(api_data)
 
                 if extracted_items:
                     print(f"✅ 成功提取了 {len(extracted_items)} 条记录")
                     self.data_processor.save_extracted_data(extracted_items)
 
+                    # 显示视频列表
+                    print(f"\n📺 提取的视频列表:")
+                    print("=" * 80)
+                    for i, item in enumerate(extracted_items[:10], 1):  # 显示前10个
+                        title = item.get('title', f"Video_{item.get('id', i)}")
+                        video_id = item.get('id', 'Unknown')
+                        url = item.get('url', '')
+                        print(f"[{i:2d}] {title}")
+                        print(f"     ID: {video_id}")
+                        print(f"     URL: {'✅ 有效' if url else '❌ 无效'}")
+                        print()
+
+                    if len(extracted_items) > 10:
+                        print(f"... 还有 {len(extracted_items) - 10} 个视频")
+                    print("=" * 80)
+
+                    # 下载选择
                     download_choice = self.ui.get_download_mode_choice()
 
                     if download_choice == "1":
@@ -167,11 +188,13 @@ class VideoDownloaderApp:
                         output_dir = input("请输入下载目录 (默认downloads): ").strip() or "downloads"
                         self.ui.interactive_video_selection(self.config.EXTRACTED_ITEMS_FILE, output_dir)
                     else:
-                        print("跳过下载，程序结束")
+                        print("跳过下载，数据已保存到文件")
                 else:
                     print("❌ 提取数据失败")
+            elif process_choice == "2":
+                print("✅ 原始API数据已保存")
             else:
-                print("跳过数据提取和下载")
+                print("退出模式3")
         else:
             print("❌ API数据获取失败")
 
