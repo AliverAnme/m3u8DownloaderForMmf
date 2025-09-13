@@ -1,7 +1,3 @@
-"""
-主应用程序模块
-整合所有功能模块，提供完整的工作流程
-"""
 
 import os
 from typing import List, Dict, Any
@@ -14,7 +10,6 @@ from ..core.config import Config
 
 
 class VideoDownloaderApp:
-    """视频下载器主应用类"""
 
     def __init__(self):
         self.config = Config()
@@ -35,7 +30,6 @@ class VideoDownloaderApp:
         """
         print("=== 开始完整工作流程 ===")
 
-        # 步骤1：从API获取数据
         print("\n步骤1: 从API获取数据...")
         api_data = self.api_client.fetch_posts_from_api(size, verify_ssl=False)
 
@@ -43,11 +37,9 @@ class VideoDownloaderApp:
             print("❌ 从API获取数据失败，工作流程中断")
             return []
 
-        # 步骤2：显示API数据概览
         print("\n步骤2: 处理API数据...")
         self.api_client.process_posts_data(api_data)
 
-        # 步骤3：提取指定字段
         print("\n步骤3: 提取指定字段 (id、url、title、description、cover)...")
         extracted_items = self.data_processor.extract_items_data(api_data)
 
@@ -57,11 +49,9 @@ class VideoDownloaderApp:
 
         print(f"✅ 成功提取了 {len(extracted_items)} 条记录")
 
-        # 步骤4：保存提取的数据
         print("\n步骤4: 保存提取的数据...")
         self.data_processor.save_extracted_data(extracted_items)
 
-        # 步骤5：显示提取结果预览
         print("\n步骤5: 显示提取结果预览...")
         print("前5条提取的记录:")
         for i, item in enumerate(extracted_items[:5], 1):

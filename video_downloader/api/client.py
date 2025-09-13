@@ -16,7 +16,6 @@ urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 
 class APIClient:
-    """API客户端类"""
 
     def __init__(self):
         self.config = Config()

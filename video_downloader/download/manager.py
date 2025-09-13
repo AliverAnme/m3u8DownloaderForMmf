@@ -19,13 +19,11 @@ from ..core.config import Config
 
 
 class DownloadManager:
-    """下载管理器类"""
 
     def __init__(self):
         self.config = Config()
 
     def check_ffmpeg(self) -> bool:
-        """检查FFmpeg是否可用"""
         try:
             result = subprocess.run(['ffmpeg', '-version'],
                                     capture_output=True, text=True, timeout=10)
@@ -62,7 +60,7 @@ class DownloadManager:
             return None
 
     def select_best_stream(self, playlist, max_quality: bool = True) -> Optional[Dict]:
-        """选择最佳质量的视频流"""
+        """选择最佳的视频流"""
         try:
             if not playlist.playlists:
                 if playlist.segments:
