@@ -420,8 +420,55 @@ def download_segments(m3u8_url: str, output_file: Path, max_workers: int = 5) ->
         return False
 
 
-def convert_to_mp4(video_file: Path, audio_file: Optional[Path], output_path: str, title: str = None) -> bool:
-    """使用FFmpeg将视频转换为MP4格式"""
+def download_cover_image(cover_url: str, output_dir: Path) -> Optional[Path]:
+    """
+    下载封面图片
+
+    Args:
+        cover_url (str): 封面图片URL
+        output_dir (Path): 输出目录
+
+    Returns:
+        Optional[Path]: 下载的图片文件路径，失败时返回None
+    """
+    if not cover_url:
+        return None
+
+    try:
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+        }
+
+        response = requests.get(cover_url, headers=headers, verify=False, timeout=30)
+        response.raise_for_status()
+
+        # 从URL或Content-Type判断文件扩展名
+        content_type = response.headers.get('content-type', '')
+        if 'jpeg' in content_type or 'jpg' in content_type:
+            ext = '.jpg'
+        elif 'png' in content_type:
+            ext = '.png'
+        elif 'webp' in content_type:
+            ext = '.webp'
+        else:
+            # 从URL获取扩展名，默认为jpg
+            ext = os.path.splitext(cover_url.split('?')[0])[-1] or '.jpg'
+
+        cover_file = output_dir / f"cover{ext}"
+
+        with open(cover_file, 'wb') as f:
+            f.write(response.content)
+
+        print(f"✅ 封面图片下载成功: {cover_file}")
+        return cover_file
+
+    except Exception as e:
+        print(f"⚠️ 封面图片下载失败: {e}")
+        return None
+
+
+def convert_to_mp4(video_file: Path, audio_file: Optional[Path], output_path: str, title: str = None, cover_file: Optional[Path] = None) -> bool:
+    """使用FFmpeg将视频转换为MP4格式，并可选添加封面"""
     try:
         # 构建输出文件名
         if title:
@@ -446,29 +493,68 @@ def convert_to_mp4(video_file: Path, audio_file: Optional[Path], output_path: st
             cmd.extend([
                 '-i', str(video_file),
                 '-i', str(audio_file),
-                '-c:v', 'libx264',  # 视频编码器
-                '-c:a', 'aac',      # 音频编码器
-                '-preset', 'fast',   # 编码速度
-                '-crf', '23',        # 质量控制
-                '-map', '0:v:0',     # 映射视频流
-                '-map', '1:a:0',     # 映射音频流
-                '-shortest',         # 以较短的流为准
             ])
+
+            # 如果有封面图片，添加为输入
+            if cover_file and cover_file.exists():
+                print(f"添加封面图片: {cover_file}")
+                cmd.extend(['-i', str(cover_file)])
+                cmd.extend([
+                    '-map', '0:v:0',     # 映射视频流
+                    '-map', '1:a:0',     # 映射音频流
+                    '-map', '2:v:0',     # 映射封面图片
+                    '-c:v:0', 'libx264', # 主视频流编码器
+                    '-c:a:0', 'aac',     # 音频编码器
+                    '-c:v:1', 'mjpeg',   # 封面使用MJPEG编码
+                    '-disposition:v:1', 'attached_pic',  # 设置封面为附加图片
+                    '-preset', 'fast',   # 编码速度
+                    '-crf', '23',        # 质量控制
+                    '-movflags', '+faststart',  # 优化MP4播放
+                ])
+            else:
+                cmd.extend([
+                    '-map', '0:v:0',     # 映射视频流
+                    '-map', '1:a:0',     # 映射音频流
+                    '-c:v', 'libx264',   # 视频编码器
+                    '-c:a', 'aac',       # 音频编码器
+                    '-preset', 'fast',   # 编码速度
+                    '-crf', '23',        # 质量控制
+                    '-movflags', '+faststart',  # 优化MP4播放
+                ])
         else:
             # 只有视频文件或视频包含音频
             print("处理包含音频的视频流或纯视频流")
-            cmd.extend([
-                '-i', str(video_file),
-                '-c:v', 'libx264',
-                '-c:a', 'aac',
-                '-preset', 'fast',
-                '-crf', '23',
-            ])
+            cmd.extend(['-i', str(video_file)])
+
+            # 如果有封面图片，添加为输入
+            if cover_file and cover_file.exists():
+                print(f"添加封面图片: {cover_file}")
+                cmd.extend(['-i', str(cover_file)])
+                cmd.extend([
+                    '-map', '0:v:0',     # 映射视频流
+                    '-map', '0:a:0',     # 映射音频流 (如果存在)
+                    '-map', '1:v:0',     # 映射封面图片
+                    '-c:v:0', 'libx264', # 主视频流编码器
+                    '-c:a:0', 'aac',     # 音频编码器
+                    '-c:v:1', 'mjpeg',   # 封面使用MJPEG编码
+                    '-disposition:v:1', 'attached_pic',  # 设置封面为附加图片
+                    '-preset', 'fast',   # 编码速度
+                    '-crf', '23',        # 质量控制
+                    '-movflags', '+faststart',  # 优化MP4播放
+                ])
+            else:
+                cmd.extend([
+                    '-c:v', 'libx264',   # 视频编码器
+                    '-c:a', 'aac',       # 音频编码器
+                    '-preset', 'fast',   # 编码速度
+                    '-crf', '23',        # 质量控制
+                    '-movflags', '+faststart',  # 优化MP4播放
+                ])
 
         cmd.append(final_output)
 
         print(f"执行FFmpeg命令...")
-        # 不显示完整命令以避免过长输出
+        print(f"FFmpeg参数: {' '.join(cmd)}")  # 显示完整命令以便调试
 
         # 执行转换 - 修复编码问题
         result = subprocess.run(
@@ -506,15 +592,16 @@ def convert_to_mp4(video_file: Path, audio_file: Optional[Path], output_path: st
         return False
 
 
-def download_m3u8_video(url: str, output_path: str, title: str = None, max_quality: bool = True) -> bool:
+def download_m3u8_video(url: str, output_path: str, title: str = None, max_quality: bool = True, cover_url: str = None) -> bool:
     """
-    下载m3u8格式视频并自动合并音视频流
+    下载m3u8格式视频并自动合并音视频流，可选添加封面
 
     Args:
         url (str): m3u8视频链接
         output_path (str): 输出文件路径
         title (str): 视频标题，用于文件命名
         max_quality (bool): 是否选择最高画质，默认True
+        cover_url (str): 封面图片URL，可选
 
     Returns:
         bool: 下载是否成功
@@ -522,6 +609,8 @@ def download_m3u8_video(url: str, output_path: str, title: str = None, max_quali
     try:
         print(f"开始下载视频: {title or 'Unknown'}")
         print(f"M3U8 URL: {url}")
+        if cover_url:
+            print(f"封面URL: {cover_url}")
 
         # 检查必要的工具
         if not check_ffmpeg():
@@ -607,9 +696,15 @@ def download_m3u8_video(url: str, output_path: str, title: str = None, max_quali
             if not audio_file:
                 print("⚠️ 未找到独立音频流，视频可能已包含音频")
 
-            # 5. 使用FFmpeg合并/转换为MP4
-            print("步骤5: 转换为MP4格式...")
-            success = convert_to_mp4(video_file, audio_file, output_path, title)
+            # 5. 下载封面图片
+            print("步骤5: 下载封面图片...")
+            cover_file = None
+            if cover_url:
+                cover_file = download_cover_image(cover_url, temp_path)
+
+            # 6. 使用FFmpeg合并/转换为MP4
+            print("步骤6: 转换为MP4格式...")
+            success = convert_to_mp4(video_file, audio_file, output_path, title, cover_file)
 
             if success:
                 print(f"✅ 视频下载完成: {output_path}")
@@ -656,6 +751,7 @@ def download_videos_from_extracted_data(json_file: str = "extracted_items.json",
         for i, item in enumerate(data, 1):
             video_url = item.get('url', '')
             title = item.get('title', f"Video_{item.get('id', i)}")
+            cover_url = item.get('cover', '')  # 获取封面URL
             video_id = item.get('id', i)
 
             print(f"\n[{i}/{len(data)}] 下载视频: {title}")
@@ -665,8 +761,8 @@ def download_videos_from_extracted_data(json_file: str = "extracted_items.json",
                 failed_count += 1
                 continue
 
-            # 下载视频
-            success = download_m3u8_video(video_url, output_dir, title)
+            # 下载视频，传递封面URL
+            success = download_m3u8_video(video_url, output_dir, title, True, cover_url)
 
             if success:
                 success_count += 1
@@ -829,12 +925,13 @@ if __name__ == "__main__":
             print("❌ 未提供视频URL")
         else:
             title = input("请输入视频标题 (可选): ").strip()
+            cover_url = input("请输入封面图片URL (可选): ").strip()
             output_dir = input("请输入下载目录 (默认downloads): ").strip() or "downloads"
 
             quality_choice = input("选择画质 (1=最高画质, 2=最低画质, 默认1): ").strip()
             max_quality = quality_choice != "2"
 
-            success = download_m3u8_video(video_url, output_dir, title, max_quality)
+            success = download_m3u8_video(video_url, output_dir, title, max_quality, cover_url)
 
             if success:
                 print("✅ 视频下载成功！")
