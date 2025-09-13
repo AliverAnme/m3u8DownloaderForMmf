@@ -15,6 +15,44 @@ import time
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+# 常量定义
+class Config:
+    """配置常量"""
+    # API配置
+    API_BASE_URL = "https://api.memefans.ai/v2/posts/"
+    DEFAULT_AUTHOR_ID = "BhhLJPlVvjU"
+    DEFAULT_PAGE_SIZE = 50
+    API_TIMEOUT = 30
+
+    # 文件名配置
+    API_RESPONSE_FILE = "api_response.json"
+    EXTRACTED_ITEMS_FILE = "extracted_items.json"
+    DEFAULT_DOWNLOADS_DIR = "downloads"
+
+    # 下载配置
+    MAX_RETRIES = 3
+    MAX_WORKERS = 5
+    DOWNLOAD_DELAY = 2  # 下载间隔秒数
+    FFMPEG_TIMEOUT = 600
+
+    # 请求头
+    DEFAULT_HEADERS = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'application/json',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+    }
+
+    # FFmpeg配置
+    FFMPEG_PARAMS = {
+        'preset': 'fast',
+        'crf': '23',
+        'video_codec': 'libx264',
+        'audio_codec': 'aac'
+    }
+
 
 def fetch_posts_from_api(size: int = 50, verify_ssl: bool = False) -> Dict[str, Any]:
     """
@@ -28,24 +66,17 @@ def fetch_posts_from_api(size: int = 50, verify_ssl: bool = False) -> Dict[str, 
         Dict[str, Any]: API返回的JSON数据
     """
     # API接口URL
-    base_url = "https://api.memefans.ai/v2/posts/"
+    base_url = Config.API_BASE_URL
 
     # 固定参数
     params = {
-        "author_id": "BhhLJPlVvjU",
+        "author_id": Config.DEFAULT_AUTHOR_ID,
         "page": 1,
         "size": size
     }
 
     # 设置请求头
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Upgrade-Insecure-Requests': '1'
-    }
+    headers = Config.DEFAULT_HEADERS
 
     try:
         print(f"正在请求API: {base_url}")
@@ -58,7 +89,7 @@ def fetch_posts_from_api(size: int = 50, verify_ssl: bool = False) -> Dict[str, 
             params=params,
             headers=headers,
             verify=verify_ssl,  # 禁用SSL证书验证
-            timeout=30  # 设置30秒超时
+            timeout=Config.API_TIMEOUT  # 设置30秒超时
         )
         response.raise_for_status()  # 检查HTTP错误
 
@@ -66,7 +97,7 @@ def fetch_posts_from_api(size: int = 50, verify_ssl: bool = False) -> Dict[str, 
         data = response.json()
 
         # 保存到本地文件
-        output_file = "api_response.json"
+        output_file = Config.API_RESPONSE_FILE
         with open(output_file, 'w', encoding='utf-8') as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
 
@@ -250,7 +281,7 @@ def check_ffmpeg() -> bool:
         return False
 
 
-def parse_m3u8(url: str) -> Optional[object]:
+def parse_m3u8(url: str) -> Optional[Any]:
     """解析m3u8文件"""
     try:
         headers = {
@@ -561,7 +592,7 @@ def convert_to_mp4(video_file: Path, audio_file: Optional[Path], output_path: st
             cmd,
             capture_output=True,
             text=False,  # 使用二进制模式避免编码问题
-            timeout=600,
+            timeout=Config.FFMPEG_TIMEOUT,
             creationflags=subprocess.CREATE_NO_WINDOW if os.name == 'nt' else 0  # Windows下隐藏窗口
         )
 
@@ -770,7 +801,7 @@ def download_videos_from_extracted_data(json_file: str = "extracted_items.json",
                 failed_count += 1
 
             # 避免请求过于频繁
-            time.sleep(2)
+            time.sleep(Config.DOWNLOAD_DELAY)
 
         print(f"\n📊 下载完成统计:")
         print(f"✅ 成功: {success_count}")
@@ -834,6 +865,247 @@ def complete_workflow(size: int = 50) -> List[Dict[str, Any]]:
     return extracted_items
 
 
+def display_video_list(json_file: str = "extracted_items.json") -> List[Dict[str, Any]]:
+    """
+    显示视频列表，供用户选择
+
+    Args:
+        json_file (str): 包含视频信息的JSON文件
+
+    Returns:
+        List[Dict[str, Any]]: 视频数据列表
+    """
+    try:
+        # 读取视频数据
+        with open(json_file, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        if not data:
+            print("❌ 没有找到视频数据")
+            return []
+
+        print(f"\n📺 视频列表 (共 {len(data)} 个视频):")
+        print("=" * 80)
+
+        for i, item in enumerate(data, 1):
+            title = item.get('title', f"Video_{item.get('id', i)}")
+            video_id = item.get('id', 'Unknown')
+            url = item.get('url', '')
+            cover = item.get('cover', '')
+
+            # 显示视频信息
+            print(f"\n[{i:2d}] {title}")
+            print(f"     ID: {video_id}")
+            if url:
+                print(f"     URL: ✅ 有效")
+            else:
+                print(f"     URL: ❌ 无效")
+            if cover:
+                print(f"     封面: ✅ 有效")
+            else:
+                print(f"     封面: ❌ 无效")
+
+        print("=" * 80)
+        return data
+
+    except FileNotFoundError:
+        print(f"❌ 文件 {json_file} 不存在")
+        return []
+    except json.JSONDecodeError as e:
+        print(f"❌ JSON解析失败: {e}")
+        return []
+    except Exception as e:
+        print(f"❌ 读取文件时发生错误: {e}")
+        return []
+
+
+def parse_selection(selection_input: str, max_count: int) -> List[int]:
+    """
+    解析用户的选择输入
+
+    Args:
+        selection_input (str): 用户输入的选择字符串
+        max_count (int): 最大视频数量
+
+    Returns:
+        List[int]: 解析后的索引列表
+    """
+    selections = []
+
+    try:
+        # 分割输入（支持逗号、空格分隔）
+        parts = re.split(r'[,，\s]+', selection_input.strip())
+
+        for part in parts:
+            if not part:
+                continue
+
+            # 处理范围选择（如 1-5）
+            if '-' in part:
+                try:
+                    start, end = map(int, part.split('-', 1))
+                    if 1 <= start <= max_count and 1 <= end <= max_count and start <= end:
+                        selections.extend(range(start, end + 1))
+                    else:
+                        print(f"⚠️ 范围 {part} 超出有效范围 (1-{max_count})")
+                except ValueError:
+                    print(f"⚠️ 无效的范围格式: {part}")
+            # 处理单个数字
+            else:
+                try:
+                    num = int(part)
+                    if 1 <= num <= max_count:
+                        selections.append(num)
+                    else:
+                        print(f"⚠️ 数字 {num} 超出有效范围 (1-{max_count})")
+                except ValueError:
+                    print(f"⚠️ 无效的数字: {part}")
+
+    except Exception as e:
+        print(f"⚠️ 解析选择时发生错误: {e}")
+
+    # 去重并排序
+    selections = sorted(list(set(selections)))
+    return selections
+
+
+def download_selected_videos(video_data: List[Dict[str, Any]],
+                           selected_indices: List[int],
+                           output_dir: str = "downloads") -> None:
+    """
+    下载选中的视频
+
+    Args:
+        video_data (List[Dict[str, Any]]): 视频数据列表
+        selected_indices (List[int]): 选中的视频索引列表（1-based）
+        output_dir (str): 下载目录
+    """
+    if not selected_indices:
+        print("❌ 没有选择任何视频")
+        return
+
+    print(f"\n📥 准备下载 {len(selected_indices)} 个视频到 {output_dir} 目录")
+
+    # 创建下载目录
+    os.makedirs(output_dir, exist_ok=True)
+
+    # 统计信息
+    success_count = 0
+    failed_count = 0
+
+    for i, index in enumerate(selected_indices, 1):
+        try:
+            # 转换为0-based索引
+            video_index = index - 1
+
+            if video_index >= len(video_data):
+                print(f"⚠️ 索引 {index} 超出范围，跳过")
+                failed_count += 1
+                continue
+
+            item = video_data[video_index]
+            video_url = item.get('url', '')
+            title = item.get('title', f"Video_{item.get('id', index)}")
+            cover_url = item.get('cover', '')
+            video_id = item.get('id', index)
+
+            print(f"\n[{i}/{len(selected_indices)}] 下载视频 #{index}: {title}")
+
+            if not video_url:
+                print(f"⚠️ 跳过 - 没有视频URL")
+                failed_count += 1
+                continue
+
+            # 下载视频
+            success = download_m3u8_video(video_url, output_dir, title, True, cover_url)
+
+            if success:
+                success_count += 1
+                print(f"✅ 视频 #{index} 下载成功")
+            else:
+                failed_count += 1
+                print(f"❌ 视频 #{index} 下载失败")
+
+            # 避免请求过于频繁
+            if i < len(selected_indices):  # 不是最后一个
+                time.sleep(Config.DOWNLOAD_DELAY)
+
+        except Exception as e:
+            print(f"❌ 下载视频 #{index} 时发生错误: {e}")
+            failed_count += 1
+
+    print(f"\n📊 下载完成统计:")
+    print(f"✅ 成功: {success_count}")
+    print(f"❌ 失败: {failed_count}")
+    print(f"📁 输出目录: {output_dir}")
+
+
+def interactive_video_selection(json_file: str = "extracted_items.json",
+                               output_dir: str = "downloads") -> None:
+    """
+    交互式视频选择和下载
+
+    Args:
+        json_file (str): 包含视频信息的JSON文件
+        output_dir (str): 下载目录
+    """
+    # 显示视频列表
+    video_data = display_video_list(json_file)
+
+    if not video_data:
+        return
+
+    print(f"\n📋 选择说明:")
+    print(f"• 单个视频: 输入数字，如 3")
+    print(f"• 多个视频: 用逗号分隔，如 1,3,5")
+    print(f"• 范围选择: 用横线连接，如 1-5")
+    print(f"• 混合选择: 如 1,3-5,8")
+    print(f"• 全部下载: 输入 all 或 *")
+    print(f"• 取消下载: 输入 q 或 quit")
+
+    selected_indices = []  # 初始化变量
+
+    while True:
+        selection_input = input(f"\n请选择要下载的视频 (1-{len(video_data)}): ").strip()
+
+        if not selection_input:
+            print("⚠️ 请输入有效的选择")
+            continue
+
+        # 检查特殊命令
+        if selection_input.lower() in ['q', 'quit', '退出']:
+            print("👋 取消下载，退出")
+            return
+
+        if selection_input.lower() in ['all', '*', '全部']:
+            selected_indices = list(range(1, len(video_data) + 1))
+            print(f"📥 选择全部 {len(selected_indices)} 个视频")
+            break
+
+        # 解析选择
+        selected_indices = parse_selection(selection_input, len(video_data))
+
+        if not selected_indices:
+            print("⚠️ 没有有效的选择，请重新输入")
+            continue
+
+        # 确认选择
+        print(f"\n📋 您选择了以下 {len(selected_indices)} 个视频:")
+        for idx in selected_indices:
+            title = video_data[idx-1].get('title', f"Video_{idx}")
+            print(f"  [{idx:2d}] {title}")
+
+        confirm = input(f"\n确认下载这些视频? (y/n, 默认y): ").strip().lower()
+        if confirm in ['', 'y', 'yes', '是', '确认']:
+            break
+        else:
+            print("重新选择...")
+            continue
+
+    # 执行下载
+    download_selected_videos(video_data, selected_indices, output_dir)
+
+
 if __name__ == "__main__":
     # 选择执行模式
     print("请选择执行模式:")
@@ -842,8 +1114,9 @@ if __name__ == "__main__":
     print("3. 仅从API获取数据")
     print("4. 下载单个m3u8视频")
     print("5. 批量下载视频 (从extracted_items.json)")
+    print("6. 交互式选择视频下载")  # 新增选项
 
-    mode = input("请输入选择 (1/2/3/4/5, 默认为1): ").strip() or "1"
+    mode = input("请输入选择 (1/2/3/4/5/6, 默认为1): ").strip() or "1"
 
     if mode == "1":
         # 完整工作流程
@@ -855,11 +1128,24 @@ if __name__ == "__main__":
         if extracted_items:
             print(f"\n🎉 工作流程成功完成！共处理了 {len(extracted_items)} 条记录")
 
-            # 询问是否下载视频
-            download_choice = input("\n是否立即下载视频? (y/n, 默认n): ").strip().lower()
-            if download_choice == 'y':
+            # 询问下载方式
+            print("\n请选择下载方式:")
+            print("1. 批量下载所有视频")
+            print("2. 交互式选择下载")
+            print("3. 跳过下载")
+
+            download_choice = input("请输入选择 (1/2/3, 默认3): ").strip() or "3"
+
+            if download_choice == "1":
+                # 批量下载所有视频
                 output_dir = input("请输入下载目录 (默认downloads): ").strip() or "downloads"
                 download_videos_from_extracted_data("extracted_items.json", output_dir)
+            elif download_choice == "2":
+                # 交互式选择下载
+                output_dir = input("请输入下载目录 (默认downloads): ").strip() or "downloads"
+                interactive_video_selection("extracted_items.json", output_dir)
+            else:
+                print("跳过下载，程序结束")
         else:
             print("\n❌ 工作流程执行失败")
 
@@ -913,6 +1199,39 @@ if __name__ == "__main__":
         if api_data:
             process_posts_data(api_data)
             print("✅ API数据获取完成")
+
+            # 询问是否提取数据并下载视频
+            extract_choice = input("\n是否提取视频数据并下载? (y/n, 默认n): ").strip().lower()
+            if extract_choice == 'y':
+                # 提取数据
+                extracted_items = extract_items_data(api_data)
+
+                if extracted_items:
+                    print(f"✅ 成功提取了 {len(extracted_items)} 条记录")
+                    save_extracted_data(extracted_items)
+
+                    # 询问下载方式
+                    print("\n请选择下载方式:")
+                    print("1. 批量下载所有视频")
+                    print("2. 交互式选择下载")
+                    print("3. 跳过下载")
+
+                    download_choice = input("请输入选择 (1/2/3, 默认3): ").strip() or "3"
+
+                    if download_choice == "1":
+                        # 批量下载所有视频
+                        output_dir = input("请输入下载目录 (默认downloads): ").strip() or "downloads"
+                        download_videos_from_extracted_data("extracted_items.json", output_dir)
+                    elif download_choice == "2":
+                        # 交互式选择下载
+                        output_dir = input("请输入下载目录 (默认downloads): ").strip() or "downloads"
+                        interactive_video_selection("extracted_items.json", output_dir)
+                    else:
+                        print("跳过下载，程序结束")
+                else:
+                    print("❌ 提取数据失败")
+            else:
+                print("跳过数据提取和下载")
         else:
             print("❌ API数据获取失败")
 
@@ -950,6 +1269,15 @@ if __name__ == "__main__":
             print(f"❌ 文件 {json_file} 不存在")
         else:
             download_videos_from_extracted_data(json_file, output_dir)
+
+    elif mode == "6":
+        # 交互式选择视频下载
+        print("\n=== 交互式选择视频下载 ===")
+
+        json_file = input("请输入JSON文件路径 (默认extracted_items.json): ").strip() or "extracted_items.json"
+        output_dir = input("请输入下载目录 (默认downloads): ").strip() or "downloads"
+
+        interactive_video_selection(json_file, output_dir)
 
     else:
         print("❌ 无效的选择，程序退出")
