@@ -1,8 +1,3 @@
-"""
-用户界面模块
-处理交互式选择、输入解析和用户交互
-"""
-
 import re
 from typing import List, Dict, Any
 
