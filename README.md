@@ -322,7 +322,6 @@ python enhanced_main.py --server --log-level DEBUG
 ## 📧 联系方式
 
 - 作者: 冰冻芋头
-- 邮箱: aliverccforward@outlook.com
 
 ---
 
