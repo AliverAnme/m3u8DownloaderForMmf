@@ -1,4 +1,3 @@
-
 import json
 import re
 from typing import Dict, Any, List
@@ -151,14 +150,15 @@ class DataProcessor:
 
                 print(f"\n[{i:2d}] {title}")
                 print(f"     ID: {video_id}")
-                print(f"     URL: {'✅ 有效' if url else '❌ 无效'}")
-                print(f"     封面: {'✅ 有效' if cover else '❌ 无效'}")
+                print(f"     URL: {url}")
+                if cover:
+                    print(f"     封面: {cover}")
+                print()
 
-            print("=" * 80)
             return data
 
         except FileNotFoundError:
-            print(f"❌ 文件 {json_file} 不存在")
+            print(f"❌ 文件不存在: {json_file}")
             return []
         except json.JSONDecodeError as e:
             print(f"❌ JSON解析失败: {e}")
@@ -166,3 +166,14 @@ class DataProcessor:
         except Exception as e:
             print(f"❌ 读取文件时发生错误: {e}")
             return []
+
+    def save_extracted_items(self, extracted_data: List[Dict[str, Any]],
+                           output_file: str = None) -> None:
+        """
+        保存提取的数据到新的JSON文件 (别名方法)
+
+        Args:
+            extracted_data (List[Dict[str, Any]]): 提取的数据
+            output_file (str): 输出文件名
+        """
+        self.save_extracted_data(extracted_data, output_file)

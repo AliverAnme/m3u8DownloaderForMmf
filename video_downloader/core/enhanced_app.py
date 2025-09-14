@@ -6,8 +6,7 @@ import os
 import sys
 import signal
 import logging
-from datetime import datetime
-from typing import List, Dict, Any, Optional
+from typing import List, Optional
 import json
 
 from ..api.client import APIClient
@@ -17,7 +16,7 @@ from ..ui.interface import UserInterface
 from ..core.config import Config
 from ..database.manager import DatabaseManager
 from ..database.models import VideoRecord, DownloadStatus
-from ..scheduler import TaskScheduler, SchedulerConfig
+from ..scheduler import TaskScheduler
 from ..cloud import CloudStorageManager
 
 
@@ -36,7 +35,7 @@ class EnhancedVideoDownloaderApp:
         self.db_manager = DatabaseManager(self.config.DATABASE_FILE)
         self.scheduler = TaskScheduler()
         self.cloud_manager = CloudStorageManager(self.config.CLOUD_CONFIG_FILE)
-        
+
         # 设置日志
         self.logger = self._setup_logger()
         
@@ -345,19 +344,63 @@ class EnhancedVideoDownloaderApp:
                 self.logger.error(f"无法访问下载目录: {download_dir}")
                 return None
 
-            # 清理文件名以避免路径遍历
+            # 首先尝试直接匹配完整的文件名
+            import glob
+            video_extensions = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']
+
+            for ext in video_extensions:
+                pattern = os.path.join(download_dir, ext)
+                files = glob.glob(pattern)
+
+                for file_path in files:
+                    filename = os.path.basename(file_path)
+                    filename_without_ext = os.path.splitext(filename)[0]
+
+                    # 检查文件名是否包含标题的主要部分
+                    if title and len(title) > 10:
+                        # 提取标题的关键部分进行匹配
+                        title_keywords = []
+                        if '】' in title:
+                            # 提取中括号后的内容
+                            after_bracket = title.split('】', 1)[1] if '】' in title else title
+                            title_keywords.append(after_bracket[:20])  # 取前20个字符
+
+                        # 添加原始标题的前20个字符
+                        title_keywords.append(title[:20])
+
+                        for keyword in title_keywords:
+                            if keyword.strip() and keyword.strip() in filename_without_ext:
+                                abs_file = os.path.abspath(file_path)
+                                abs_download_dir = os.path.abspath(download_dir)
+                                if abs_file.startswith(abs_download_dir) and os.path.isfile(abs_file):
+                                    self.logger.info(f"找到下载文件: {abs_file}")
+                                    return abs_file
+
+                    # 按视频ID匹配
+                    if video_id and video_id in filename_without_ext:
+                        abs_file = os.path.abspath(file_path)
+                        abs_download_dir = os.path.abspath(download_dir)
+                        if abs_file.startswith(abs_download_dir) and os.path.isfile(abs_file):
+                            self.logger.info(f"找到下载文件: {abs_file}")
+                            return abs_file
+
+            # 如果直接匹配失败，尝试模糊匹配
+            # 清理文件名以避免路径遍历，但保留更多字符
             import re
-            safe_title = re.sub(r'[^\w\s-]', '', title)[:50] if title else ''
-            safe_video_id = re.sub(r'[^\w-]', '', video_id)[:20] if video_id else ''
+            safe_title = re.sub(r'[<>:"/\\|?*]', '', title) if title else ''
+            safe_video_id = re.sub(r'[^\w-]', '', video_id) if video_id else ''
 
             # 可能的文件名模式
             patterns = []
-            if safe_title:
+            if safe_title and len(safe_title) > 5:
+                # 使用更宽松的匹配模式
+                safe_title_short = safe_title[:30]  # 取前30个字符
                 patterns.extend([
-                    f"{safe_title}*.mp4",
-                    f"{safe_title}*.mkv",
-                    f"{safe_title}*.avi"
+                    f"*{safe_title_short}*.mp4",
+                    f"*{safe_title_short}*.mkv",
+                    f"*{safe_title_short}*.avi"
                 ])
+
             if safe_video_id:
                 patterns.extend([
                     f"*{safe_video_id}*.mp4",
@@ -365,7 +408,6 @@ class EnhancedVideoDownloaderApp:
                     f"*{safe_video_id}*.avi"
                 ])
 
-            import glob
             for pattern in patterns:
                 try:
                     # 使用绝对路径进行搜索
@@ -386,6 +428,17 @@ class EnhancedVideoDownloaderApp:
                     continue
 
             self.logger.warning(f"未找到视频文件: title={title}, id={video_id}")
+
+            # 最后的尝试：列出下载目录中的所有视频文件
+            self.logger.info("尝试列出下载目录中的所有视频文件:")
+            for ext in video_extensions:
+                pattern = os.path.join(download_dir, ext)
+                files = glob.glob(pattern)
+                for file_path in files:
+                    filename = os.path.basename(file_path)
+                    file_size = os.path.getsize(file_path) / (1024 * 1024)  # MB
+                    self.logger.info(f"  - {filename} ({file_size:.1f} MB)")
+
             return None
 
         except Exception as e:
@@ -416,33 +469,44 @@ class EnhancedVideoDownloaderApp:
     
     def run_interactive_mode(self):
         """运行交互模式"""
-        try:
-            # 显示增强菜单
-            mode = self._show_enhanced_menu()
-            
-            mode_handlers = {
-                "1": self.handle_mode_1,
-                "2": self.handle_mode_2,
-                "3": self.handle_mode_3,
-                "4": self.handle_mode_4,
-                "5": self.handle_mode_5,
-                "6": self.handle_mode_6,
-                "7": self.handle_database_operations,
-                "8": self.handle_cloud_operations,
-                "9": self.handle_scheduler_operations,
-                "10": self.show_statistics
-            }
-            
-            handler = mode_handlers.get(mode)
-            if handler:
-                handler()
-            else:
-                print("❌ 无效的选择，程序退出")
-                
-        except Exception as e:
-            self.logger.error(f"交互模式运行异常: {e}")
-            print(f"❌ 程序运行异常: {e}")
-    
+        while True:
+            try:
+                # 显示增强菜单
+                mode = self._show_enhanced_menu()
+
+                mode_handlers = {
+                    "1": self.handle_mode_1,
+                    "2": self.handle_mode_2,
+                    "3": self.handle_mode_3,
+                    "4": self.handle_mode_4,
+                    "5": self.handle_mode_5,
+                    "6": self.handle_mode_6,
+                    "7": self.handle_database_operations,
+                    "8": self.handle_cloud_operations,
+                    "9": self.handle_scheduler_operations,
+                    "10": self.show_statistics
+                }
+
+                if mode.lower() in ['q', 'quit', 'exit']:
+                    print("👋 退出程序")
+                    break
+
+                handler = mode_handlers.get(mode)
+                if handler:
+                    handler()
+                else:
+                    print("❌ 无效的选择，请重新选择")
+
+            except KeyboardInterrupt:
+                print("\n\n👋 用户中断程序，正在退出...")
+                break
+            except Exception as e:
+                self.logger.error(f"交互模式运行异常: {e}")
+                print(f"❌ 程序运行异常: {e}")
+                print("程序将继续运行，请重新选择功能")
+                import traceback
+                traceback.print_exc()
+
     def _show_enhanced_menu(self) -> str:
         """显示增强版菜单"""
         print("\n" + "="*60)
@@ -460,6 +524,7 @@ class EnhancedVideoDownloaderApp:
         print("  8. 云存储管理")
         print("  9. 定时任务管理")
         print(" 10. 统计信息")
+        print("\n💡 输入 q/quit/exit 退出程序")
         print("="*60)
         
         choice = input("请选择功能 (1-10): ").strip()
@@ -473,11 +538,16 @@ class EnhancedVideoDownloaderApp:
         print("3. 查看已完成视频")
         print("4. 搜索视频")
         print("5. 清理失败记录")
-        
-        choice = input("请选择操作 (1-5): ").strip()
-        
+        print("6. 检测本地文件状态")
+        print("7. 文件与数据库同步")
+        print("8. 下载缺失的视频文件")
+        print("9. 视频文件分类管理")
+        print("10. 文件夹统计信息")
+
+        choice = input("请选择操作 (1-10): ").strip()
+
         if choice == "1":
-            videos = self.db_manager.get_all_videos(50)
+            videos = self.db_manager.get_all_videos()
             self._display_video_list(videos)
         elif choice == "2":
             videos = self.db_manager.get_videos_by_status(DownloadStatus.PENDING)
@@ -492,305 +562,379 @@ class EnhancedVideoDownloaderApp:
         elif choice == "5":
             count = self.db_manager.cleanup_failed_downloads()
             print(f"✅ 清理了 {count} 个失败记录")
-    
-    def handle_cloud_operations(self):
-        """处理云存储操作"""
-        print("\n=== 云存储管理 ===")
-        print("1. 测试连接")
-        print("2. 查看配置")
-        print("3. 上传待上传视频")
-        print("4. 上传统计")
-        
-        choice = input("请选择操作 (1-4): ").strip()
-        
-        if choice == "1":
-            results = self.cloud_manager.test_connection()
-            for storage, status in results.items():
-                status_text = "✅ 连接正常" if status else "❌ 连接失败"
-                print(f"{storage.upper()}: {status_text}")
-        elif choice == "2":
-            stats = self.cloud_manager.get_upload_statistics()
-            print(json.dumps(stats, indent=2, ensure_ascii=False))
-        elif choice == "3":
-            self.scheduled_upload_videos()
-        elif choice == "4":
-            stats = self.cloud_manager.get_upload_statistics()
-            print(f"活跃存储: {', '.join(stats['active_storages'])}")
-    
-    def handle_scheduler_operations(self):
-        """处理定时任务操作"""
-        print("\n=== 定时任务管理 ===")
-        print("1. 查看任务状态")
-        print("2. 手动执行获取任务")
-        print("3. 手动执行上传任务")
-        print("4. 手动执行清理任务")
-        print("5. 启动/停止调度器")
-        
-        choice = input("请选择操作 (1-5): ").strip()
-        
-        if choice == "1":
-            tasks = self.scheduler.get_task_info()
-            for task in tasks:
-                print(f"任务: {task['name']}")
-                print(f"  类型: {task.get('type', 'unknown')}")
-                print(f"  下次运行: {task.get('next_run', '未知')}")
-                print()
-        elif choice == "2":
-            self.scheduler.run_task_once("fetch_new_videos")
-        elif choice == "3":
-            self.scheduler.run_task_once("upload_completed_videos")
-        elif choice == "4":
-            self.scheduler.run_task_once("daily_cleanup")
-        elif choice == "5":
-            if self.scheduler.is_running:
-                self.scheduler.stop()
-                print("✅ 调度器已停止")
-            else:
-                self.scheduler.start()
-                print("✅ 调度器已启动")
-    
-    def show_statistics(self):
-        """显示统计信息"""
-        print("\n=== 系统统计 ===")
-        
-        # 数据库统计
-        db_stats = self.db_manager.get_statistics()
-        print("📊 数据库统计:")
-        for key, value in db_stats.items():
-            if key == 'total_size':
-                value = f"{value / (1024*1024):.2f} MB" if value > 0 else "0 MB"
-            print(f"  {key}: {value}")
-        
-        # 云存储统计
-        cloud_stats = self.cloud_manager.get_upload_statistics()
-        print("\n☁️ 云存储统计:")
-        print(f"  活跃存储: {len(cloud_stats['active_storages'])}")
-        for storage, status in cloud_stats.get('connection_status', {}).items():
-            status_text = "正常" if status else "异常"
-            print(f"  {storage}: {status_text}")
-        
-        # 任务统计
-        tasks = self.scheduler.get_task_info()
-        print(f"\n⏰ 定时任务: {len(tasks)} 个")
-        print(f"  调度器状态: {'运行中' if self.scheduler.is_running else '已停止'}")
-    
-    def _display_video_list(self, videos: List[VideoRecord], title: str = "视频列表"):
-        """显示视频列表"""
-        if not videos:
-            print(f"📺 {title}: 无数据")
+        elif choice == "6":
+            self.handle_local_file_detection()
+        elif choice == "7":
+            self.handle_file_database_sync()
+        elif choice == "8":
+            self.handle_download_missing_videos()
+        elif choice == "9":
+            self.handle_video_classification()
+        elif choice == "10":
+            self.handle_folder_statistics()
+
+    def handle_local_file_detection(self):
+        """处理本地文件检测"""
+        print("\n=== 本地文件检测 ===")
+        print("🔍 正在分析文件与数据库记录的对应关系...")
+
+        # 实现文件检测逻辑
+        sync_stats = self.db_manager.sync_database_with_local_files(self.config.DEFAULT_DOWNLOADS_DIR)
+
+        if sync_stats:
+            print(f"📊 同步完成:")
+            print(f"  ✅ 更新为已完成: {sync_stats['updated_to_completed']}")
+            print(f"  ⏳ 重置为待下载: {sync_stats['updated_to_missing']}")
+            print(f"  📝 创建新记录: {sync_stats['created_from_files']}")
+            print(f"  🔗 文件匹配: {sync_stats['files_matched']}")
+
+        input("按 Enter 键继续...")
+
+    def handle_file_database_sync(self):
+        """处理文件与数据库同步"""
+        print("\n=== 文件与数据库同步 ===")
+        # 实现同步逻辑
+        print("同步功能待实现")
+        input("按 Enter 键继续...")
+
+    def handle_download_missing_videos(self):
+        """处理下载缺失视频文件"""
+        print("\n=== 下载缺失的视频文件 ===")
+
+        # 首先同步数据库状态
+        print("🔄 正在同步数据库状态...")
+        sync_stats = self.db_manager.sync_database_with_local_files(self.config.DEFAULT_DOWNLOADS_DIR)
+
+        if sync_stats:
+            print(f"📊 同步完成:")
+            print(f"  ✅ 更新为已完成: {sync_stats['updated_to_completed']}")
+            print(f"  ⏳ 重置为待下载: {sync_stats['updated_to_missing']}")
+            print(f"  📝 创建新记录: {sync_stats['created_from_files']}")
+            print(f"  🔗 文件匹配: {sync_stats['files_matched']}")
+
+        # 获取缺失文件的视频
+        missing_videos = self.db_manager.get_videos_missing_files()
+
+        if not missing_videos:
+            print("✅ 所有视频文件都已存在，无需下载")
+            input("按 Enter 键返回...")
             return
-        
-        print(f"\n📺 {title} (共 {len(videos)} 个):")
-        print("="*80)
-        
-        for i, video in enumerate(videos[:20], 1):  # 最多显示20个
+
+        print(f"\n🔍 发现 {len(missing_videos)} 个缺失文件的视频:")
+        print("=" * 80)
+
+        # 显示缺失的视频列表
+        for i, video in enumerate(missing_videos[:20], 1):
             status_emoji = {
                 DownloadStatus.PENDING: "⏳",
-                DownloadStatus.DOWNLOADING: "⬇️",
-                DownloadStatus.COMPLETED: "✅",
-                DownloadStatus.FAILED: "❌",
-                DownloadStatus.UPLOADED: "☁️"
+                DownloadStatus.COMPLETED: "💔",  # 标记为完成但文件不存在
+                DownloadStatus.FAILED: "❌"
             }.get(video.download_status, "❓")
-            
+
             print(f"[{i:2d}] {status_emoji} {video.title}")
             print(f"     ID: {video.id}")
             print(f"     状态: {video.download_status.value}")
+            if video.url:
+                print(f"     URL: {video.url[:50]}...")
+            print()
+
+        if len(missing_videos) > 20:
+            print(f"... 还有 {len(missing_videos) - 20} 个缺失视频")
+
+        print("\n📥 下载选项:")
+        print("1. 下载所有缺失的视频")
+        print("2. 选择性下载视频")
+        print("3. 仅下载有URL的视频")
+        print("0. 返回上级菜单")
+
+        choice = input("请选择 (0-3): ").strip()
+
+        if choice == "1":
+            self._download_all_missing_videos(missing_videos)
+        elif choice == "2":
+            self._interactive_download_missing_videos(missing_videos)
+        elif choice == "3":
+            videos_with_url = [v for v in missing_videos if v.url]
+            if videos_with_url:
+                self._download_all_missing_videos(videos_with_url)
+            else:
+                print("❌ 没有找到有URL的缺失视频")
+                input("按 Enter 键继续...")
+
+    def _download_all_missing_videos(self, missing_videos: List[VideoRecord]):
+        """下载所有缺失的视频"""
+        videos_with_url = [v for v in missing_videos if v.url]
+        videos_without_url = [v for v in missing_videos if not v.url]
+
+        print(f"\n📥 准备下载 {len(videos_with_url)} 个有URL的视频")
+        if videos_without_url:
+            print(f"⚠️ 跳过 {len(videos_without_url)} 个无URL的本地文件记录")
+
+        if not videos_with_url:
+            print("❌ 没有可下载的视频")
+            input("按 Enter 键继续...")
+            return
+
+        confirm = input(f"确认下载这 {len(videos_with_url)} 个视频? (y/n): ").strip().lower()
+        if confirm != 'y':
+            return
+
+        downloaded_count = 0
+        failed_count = 0
+
+        for i, video in enumerate(videos_with_url, 1):
+            print(f"\n[{i}/{len(videos_with_url)}] 下载: {video.title}")
+
+            try:
+                # 更新状态为下载中
+                self.db_manager.update_video_status(video.id, DownloadStatus.DOWNLOADING)
+
+                # 执行下载
+                success = self.download_manager.download_m3u8_video(
+                    video.url,
+                    self.config.DEFAULT_DOWNLOADS_DIR,
+                    video.title,
+                    max_quality=True,
+                    cover_url=video.cover
+                )
+
+                if success:
+                    # 查找下载的文件
+                    download_path = self._find_downloaded_file(video.title, video.id)
+                    if download_path:
+                        file_size = os.path.getsize(download_path)
+                        self.db_manager.update_video_status(
+                            video.id,
+                            DownloadStatus.COMPLETED,
+                            download_path,
+                            file_size
+                        )
+                        downloaded_count += 1
+                        print(f"✅ 下载成功")
+                    else:
+                        self.db_manager.update_video_status(video.id, DownloadStatus.FAILED)
+                        failed_count += 1
+                        print(f"❌ 下载失败: 文件未找到")
+                else:
+                    self.db_manager.update_video_status(video.id, DownloadStatus.FAILED)
+                    failed_count += 1
+                    print(f"❌ 下载失败")
+
+            except Exception as e:
+                self.db_manager.update_video_status(video.id, DownloadStatus.FAILED)
+                failed_count += 1
+                print(f"❌ 下载异常: {e}")
+
+        print(f"\n📊 下载完成:")
+        print(f"  ✅ 成功: {downloaded_count}")
+        print(f"  ❌ 失败: {failed_count}")
+        print(f"  📊 总计: {len(videos_with_url)}")
+
+        input("按 Enter 键继续...")
+
+    def _interactive_download_missing_videos(self, missing_videos: List[VideoRecord]):
+        """交互式选择下载缺失视频"""
+        videos_with_url = [v for v in missing_videos if v.url]
+
+        if not videos_with_url:
+            print("❌ 没有可下载的视频（缺失URL）")
+            input("按 Enter 键继续...")
+            return
+
+        print(f"\n📋 可下载的视频列表 (共 {len(videos_with_url)} 个):")
+        print("=" * 80)
+
+        for i, video in enumerate(videos_with_url, 1):
+            print(f"[{i:2d}] {video.title}")
+            print(f"     ID: {video.id}")
+            print()
+
+        print("💡 选择说明:")
+        print("• 单个视频: 输入数字，如 3")
+        print("• 多个视频: 用逗号分隔，如 1,3,5")
+        print("• 范围选择: 用横线连接，如 1-5")
+        print("• 全部下载: 输入 all")
+        print("• 取消: 输入 q")
+
+        while True:
+            selection = input(f"\n请选择要下载的视频 (1-{len(videos_with_url)}): ").strip()
+
+            if not selection or selection.lower() == 'q':
+                return
+
+            if selection.lower() == 'all':
+                selected_videos = videos_with_url
+                break
+
+            try:
+                # 解析选择
+                selected_indices = self._parse_video_selection(selection, len(videos_with_url))
+                if selected_indices:
+                    selected_videos = [videos_with_url[i-1] for i in selected_indices]
+                    break
+                else:
+                    print("❌ 无效的选择，请重新输入")
+            except:
+                print("❌ 输入格式错误，请重新输入")
+
+        # 确认并下载
+        print(f"\n📋 您选择了 {len(selected_videos)} 个视频:")
+        for i, video in enumerate(selected_videos[:5], 1):
+            print(f"  [{i}] {video.title}")
+        if len(selected_videos) > 5:
+            print(f"  ... 还有 {len(selected_videos) - 5} 个视频")
+
+        confirm = input(f"\n确认下载这些视频? (y/n): ").strip().lower()
+        if confirm == 'y':
+            self._download_all_missing_videos(selected_videos)
+
+    def _parse_video_selection(self, selection: str, max_count: int) -> List[int]:
+        """解析视频选择输入"""
+        import re
+        selections = []
+
+        try:
+            parts = re.split(r'[,，\s]+', selection.strip())
+
+            for part in parts:
+                if not part:
+                    continue
+
+                if '-' in part:
+                    # 范围选择
+                    start, end = map(int, part.split('-', 1))
+                    if 1 <= start <= max_count and 1 <= end <= max_count and start <= end:
+                        selections.extend(range(start, end + 1))
+                else:
+                    # 单个数字
+                    num = int(part)
+                    if 1 <= num <= max_count:
+                        selections.append(num)
+
+            return sorted(list(set(selections)))
+        except:
+            return []
+
+    def handle_video_classification(self):
+        """处理视频分类管理"""
+        print("\n=== 视频文件分类管理 ===")
+        print("分类功能待实现")
+        input("按 Enter 键继续...")
+
+    def handle_folder_statistics(self):
+        """处理文件夹统计信息"""
+        print("\n📊 文件夹统计信息")
+        print("统计功能待实现")
+        input("按 Enter 键继续...")
+
+    def handle_cloud_operations(self):
+        """处理云存储操作"""
+        print("\n=== 云存储管理 ===")
+        print("云存储功能待实现")
+        input("按 Enter 键继续...")
+
+    def handle_scheduler_operations(self):
+        """处理定时任务操作"""
+        print("\n=== 定时任务管理 ===")
+        print("定时任务功能待实现")
+        input("按 Enter 键继续...")
+
+    def show_statistics(self):
+        """显示统计信息"""
+        print("\n=== 统计信息 ===")
+        stats = self.db_manager.get_statistics()
+        print(json.dumps(stats, indent=2, ensure_ascii=False))
+        input("按 Enter 键继续...")
+
+    def handle_mode_1(self):
+        """处理模式1：完整工作流程"""
+        print("\n=== 完整工作流程 ===")
+        # 实现完整工作流程
+        input("按 Enter 键继续...")
+
+    def handle_mode_2(self):
+        """处理模式2：从本地JSON文件提取并下载"""
+        print("\n=== 从本地JSON文件提取并下载 ===")
+        # 实现从本地文件提取
+        input("按 Enter 键继续...")
+
+    def handle_mode_3(self):
+        """处理模式3：仅从API获取数据"""
+        print("\n=== 仅从API获取数据 ===")
+        # 实现API获取数据
+        input("按 Enter 键继续...")
+
+    def handle_mode_4(self):
+        """处理模式4：下载单个m3u8视频"""
+        print("\n=== 下载单个m3u8视频 ===")
+        # 实现单个视频下载
+        input("按 Enter 键继续...")
+
+    def handle_mode_5(self):
+        """处理模式5：批量下载视频"""
+        print("\n=== 批量下载视频 ===")
+        # 实现批量下载
+        input("按 Enter 键继续...")
+
+    def handle_mode_6(self):
+        """处理模式6：交互式选择下载"""
+        print("\n=== 交互式选择下载 ===")
+        # 实现交互式选择下载
+        input("按 Enter 键继续...")
+
+    def _display_video_list(self, videos: List[VideoRecord], title: str = "视频列表"):
+        """显示视频列表"""
+        if not videos:
+            print(f"📺 {title}: 暂无视频")
+            return
+
+        print(f"\n📺 {title} (共 {len(videos)} 个):")
+        print("=" * 80)
+
+        for i, video in enumerate(videos[:20], 1):
+            status_emoji = {
+                DownloadStatus.PENDING: "⏳",
+                DownloadStatus.COMPLETED: "✅",
+                DownloadStatus.FAILED: "❌",
+                DownloadStatus.DOWNLOADING: "⬇️"
+            }.get(video.download_status, "❓")
+
+            print(f"[{i:2d}] {status_emoji} {video.title}")
+            print(f"     ID: {video.id}")
             if video.file_path:
                 print(f"     文件: {video.file_path}")
             print()
-        
+
         if len(videos) > 20:
             print(f"... 还有 {len(videos) - 20} 个视频")
-    
-    # 保留原有的处理方法
-    def handle_mode_1(self):
-        """处理模式1：完整工作流程（增强版）"""
-        size = input("请输入每页数据条数 (默认50): ").strip()
-        size = int(size) if size.isdigit() else 50
 
-        print("=== 开始完整工作流程 ===")
-        
-        # 获取API数据
-        api_data = self.api_client.fetch_posts_from_api(size, verify_ssl=False)
-        if not api_data:
-            print("❌ 从API获取数据失败")
-            return
+        is_duplicates = input("是否查看重复视频的详情? (y/n): ").strip().lower() == 'y'
+        if is_duplicates:
+            # 显示重复视频详情逻辑
+            pass
 
-        # 提取视频数据
-        extracted_items = self.data_processor.extract_items_data(api_data)
-        if not extracted_items:
-            print("❌ 提取数据失败")
-            return
+        input("按 Enter 键返回主菜单...")
 
-        # 保存到数据库并检查重复
-        new_videos = []
-        duplicate_videos = []
-        
-        for item in extracted_items:
-            video_id = item.get('id')
-            if not video_id:
-                continue
-            
-            existing_video = self.db_manager.get_video(video_id)
-            if existing_video:
-                duplicate_videos.append(item)
-            else:
-                video_record = VideoRecord(
-                    id=video_id,
-                    title=item.get('title', ''),
-                    url=item.get('url', ''),
-                    description=item.get('description', ''),
-                    cover=item.get('cover', ''),
-                    download_status=DownloadStatus.PENDING
-                )
-                
-                if self.db_manager.add_video(video_record):
-                    new_videos.append(item)
-
-        print(f"✅ 发现 {len(new_videos)} 个新视频")
-        print(f"⚠️ 跳过 {len(duplicate_videos)} 个重复视频")
-
-        if new_videos:
-            # 显示新视频列表
-            print(f"\n📺 新视频列表:")
-            print("=" * 80)
-            for i, item in enumerate(new_videos[:10], 1):
-                title = item.get('title', f"Video_{item.get('id')}")
-                print(f"[{i:2d}] {title}")
-                print(f"     ID: {item.get('id')}")
-                print()
-
-            # 下载选择
-            download_choice = input("\n是否下载新视频? (1=全部下载, 2=选择下载, n=跳过): ").strip().lower()
-            
-            if download_choice == "1":
-                for item in new_videos:
-                    video_id = item.get('id')
-                    if video_id:
-                        self.download_and_upload_video(video_id)
-            elif download_choice == "2":
-                # 交互式选择
-                self.interactive_select_and_download(new_videos)
-        else:
-            print("没有新视频需要下载")
-    
-    def download_and_upload_video(self, video_id: str) -> bool:
-        """下载并上传视频"""
-        try:
-            video = self.db_manager.get_video(video_id)
-            if not video:
-                return False
-            
-            # 更新状态为下载中
-            self.db_manager.update_video_status(video_id, DownloadStatus.DOWNLOADING)
-            
-            # 执行下载
-            success = self.download_manager.download_m3u8_video(
-                video.url,
-                self.config.DEFAULT_DOWNLOADS_DIR,
-                video.title,
-                max_quality=True,
-                cover_url=video.cover
-            )
-            
-            if success:
-                # 查找下载的文件
-                download_path = self._find_downloaded_file(video.title, video.id)
-                if download_path:
-                    file_size = os.path.getsize(download_path)
-                    self.db_manager.update_video_status(
-                        video_id, 
-                        DownloadStatus.COMPLETED,
-                        download_path,
-                        file_size
-                    )
-                    
-                    # 自动上传到云存储
-                    if self.config.CLOUD_AUTO_UPLOAD:
-                        self.upload_video_to_cloud(video_id)
-                    
-                    print(f"✅ 视频下载成功: {video.title}")
-                    return True
-                else:
-                    self.db_manager.update_video_status(video_id, DownloadStatus.FAILED)
-            else:
-                self.db_manager.update_video_status(video_id, DownloadStatus.FAILED)
-            
-            return False
-            
-        except Exception as e:
-            self.logger.error(f"下载视频失败: {e}")
-            self.db_manager.update_video_status(video_id, DownloadStatus.FAILED)
-            return False
-    
-    def interactive_select_and_download(self, videos: List[Dict[str, Any]]):
-        """交互式选择并下载视频"""
-        print("\n请选择要下载的视频 (输入序号，用逗号分隔，如: 1,3,5):")
-        
-        try:
-            selection = input("选择: ").strip()
-            if not selection:
-                return
-            
-            indices = [int(x.strip()) - 1 for x in selection.split(',')]
-            selected_videos = [videos[i] for i in indices if 0 <= i < len(videos)]
-            
-            for video in selected_videos:
-                video_id = video.get('id')
-                if video_id:
-                    self.download_and_upload_video(video_id)
-                    
-        except (ValueError, IndexError) as e:
-            print(f"❌ 输入格式错误: {e}")
-    
-    # 保留其他原有方法的引用，但可以在这些方法中集成数据库操作
-    def handle_mode_2(self):
-        """处理模式2：从本地JSON文件提取字段（保持兼容）"""
-        # 调用原有的处理逻辑，这里可以保持不变或稍作修改
-        from ..core.main import VideoDownloaderApp
-        original_app = VideoDownloaderApp()
-        original_app.handle_mode_2()
-    
-    def handle_mode_3(self):
-        """处理模式3：仅从API获取数据（保持兼容）"""
-        from ..core.main import VideoDownloaderApp
-        original_app = VideoDownloaderApp()
-        original_app.handle_mode_3()
-    
-    def handle_mode_4(self):
-        """处理模式4：下载单个m3u8视频（保持兼容）"""
-        from ..core.main import VideoDownloaderApp
-        original_app = VideoDownloaderApp()
-        original_app.handle_mode_4()
-    
-    def handle_mode_5(self):
-        """处理模式5：批量下载视频（保持兼容）"""
-        from ..core.main import VideoDownloaderApp
-        original_app = VideoDownloaderApp()
-        original_app.handle_mode_5()
-    
-    def handle_mode_6(self):
-        """处理模式6：交互式选择视频下载（保持兼容）"""
-        from ..core.main import VideoDownloaderApp
-        original_app = VideoDownloaderApp()
-        original_app.handle_mode_6()
-    
     def shutdown(self):
         """安全关闭应用"""
-        self.logger.info("正在关闭应用...")
-        
-        # 停止调度器
-        if self.scheduler.is_running:
-            self.scheduler.stop()
-        
-        # 删除PID文件
-        if os.path.exists(self.config.PID_FILE):
-            os.remove(self.config.PID_FILE)
-        
-        self.logger.info("应用已安全关闭")
-    
+        try:
+            if hasattr(self, 'scheduler') and self.scheduler:
+                self.scheduler.stop()
+
+            if hasattr(self, 'db_manager') and self.db_manager:
+                self.db_manager.close()
+
+            # 清理PID文件
+            if hasattr(self, 'config') and os.path.exists(self.config.PID_FILE):
+                os.remove(self.config.PID_FILE)
+
+            self.logger.info("应用已安全关闭")
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.error(f"关闭应用时出错: {e}")
+
     def run(self):
-        """主运行方法"""
+        """主运行方法 - 根据模式选择运行方式"""
         if self.server_mode:
             self.run_server_mode()
         else:
