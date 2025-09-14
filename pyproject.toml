@@ -1,7 +1,7 @@
 [tool.poetry]
 name = "video_downloader_for_memefans"
-version = "0.1.0"
-description = ""
+version = "2.0.0"
+description = "增强版视频下载器 - 支持定时运行、数据库管理、重复检测和网盘推送"
 authors = ["冰冻芋头 <aliverccforward@outlook.com>"]
 readme = "README.md"
 
@@ -11,7 +11,8 @@ requests = "^2.32.5"
 m3u8 = "^6.0.0"
 moviepy = "^2.2.1"
 pillow = "^11.3.0"
-
+python-daemon = "^3.0.1"
+schedule = "^1.2.2"
 
 [build-system]
 requires = ["poetry-core"]
