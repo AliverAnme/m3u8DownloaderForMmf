@@ -244,6 +244,13 @@ class DownloadManager:
 
             cmd = ['ffmpeg', '-y']
 
+            # 确保FFmpeg参数正确访问
+            ffmpeg_params = self.config.FFMPEG_PARAMS
+            video_codec = ffmpeg_params.get('video_codec', 'libx264')
+            audio_codec = ffmpeg_params.get('audio_codec', 'aac')
+            preset = ffmpeg_params.get('preset', 'fast')
+            crf = ffmpeg_params.get('crf', '23')
+
             if audio_file and audio_file.exists():
                 print("使用独立音频流进行合并")
                 cmd.extend(['-i', str(video_file), '-i', str(audio_file)])
@@ -252,21 +259,21 @@ class DownloadManager:
                     cmd.extend(['-i', str(cover_file)])
                     cmd.extend([
                         '-map', '0:v:0', '-map', '1:a:0', '-map', '2:v:0',
-                        '-c:v:0', self.config.FFMPEG_PARAMS['video_codec'],
-                        '-c:a:0', self.config.FFMPEG_PARAMS['audio_codec'],
+                        '-c:v:0', video_codec,
+                        '-c:a:0', audio_codec,
                         '-c:v:1', 'mjpeg',
                         '-disposition:v:1', 'attached_pic',
-                        '-preset', self.config.FFMPEG_PARAMS['preset'],
-                        '-crf', self.config.FFMPEG_PARAMS['crf'],
+                        '-preset', preset,
+                        '-crf', crf,
                         '-movflags', '+faststart'
                     ])
                 else:
                     cmd.extend([
                         '-map', '0:v:0', '-map', '1:a:0',
-                        '-c:v', self.config.FFMPEG_PARAMS['video_codec'],
-                        '-c:a', self.config.FFMPEG_PARAMS['audio_codec'],
-                        '-preset', self.config.FFMPEG_PARAMS['preset'],
-                        '-crf', self.config.FFMPEG_PARAMS['crf'],
+                        '-c:v', video_codec,
+                        '-c:a', audio_codec,
+                        '-preset', preset,
+                        '-crf', crf,
                         '-movflags', '+faststart'
                     ])
             else:
@@ -275,26 +282,26 @@ class DownloadManager:
                     cmd.extend(['-i', str(cover_file)])
                     cmd.extend([
                         '-map', '0:v:0', '-map', '0:a:0', '-map', '1:v:0',
-                        '-c:v:0', self.config.FFMPEG_PARAMS['video_codec'],
-                        '-c:a:0', self.config.FFMPEG_PARAMS['audio_codec'],
+                        '-c:v:0', video_codec,
+                        '-c:a:0', audio_codec,
                         '-c:v:1', 'mjpeg',
                         '-disposition:v:1', 'attached_pic',
-                        '-preset', self.config.FFMPEG_PARAMS['preset'],
-                        '-crf', self.config.FFMPEG_PARAMS['crf'],
+                        '-preset', preset,
+                        '-crf', crf,
                         '-movflags', '+faststart'
                     ])
                 else:
                     cmd.extend([
-                        '-c:v', self.config.FFMPEG_PARAMS['video_codec'],
-                        '-c:a', self.config.FFMPEG_PARAMS['audio_codec'],
-                        '-preset', self.config.FFMPEG_PARAMS['preset'],
-                        '-crf', self.config.FFMPEG_PARAMS['crf'],
+                        '-c:v', video_codec,
+                        '-c:a', audio_codec,
+                        '-preset', preset,
+                        '-crf', crf,
                         '-movflags', '+faststart'
                     ])
 
             cmd.append(final_output)
 
-            print(f"执行FFmpeg命令...")
+            print(f"执行FFmpeg命令: {' '.join(cmd[:10])}...")  # 只显示命令的前几个参数
             result = subprocess.run(
                 cmd,
                 capture_output=True,
