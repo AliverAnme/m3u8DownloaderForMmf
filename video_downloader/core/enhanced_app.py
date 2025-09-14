@@ -65,8 +65,9 @@ class EnhancedVideoDownloaderApp:
             file_handler.setFormatter(file_formatter)
             logger.addHandler(file_handler)
             
-            # 控制台日志处理器（非服务器模式）
-            if not self.server_mode:
+            # 在交互模式下不显示控制台日志，避免界面混乱
+            # 只在服务器模式下才启用控制台日志
+            if self.server_mode:
                 console_handler = logging.StreamHandler()
                 console_formatter = logging.Formatter('%(levelname)s - %(message)s')
                 console_handler.setFormatter(console_formatter)
@@ -161,13 +162,17 @@ class EnhancedVideoDownloaderApp:
             
             # 检查重复并保存到数据库
             new_videos = 0
+            duplicate_videos = 0
             for item in extracted_items:
                 video_id = item.get('id')
                 if not video_id:
                     continue
-                
+
                 # 检查是否已存在
-                if not self.db_manager.get_video(video_id):
+                existing_video = self.db_manager.get_video(video_id)
+                if existing_video:
+                    duplicate_videos += 1
+                else:
                     video_record = VideoRecord(
                         id=video_id,
                         title=item.get('title', ''),
@@ -176,12 +181,14 @@ class EnhancedVideoDownloaderApp:
                         cover=item.get('cover', ''),
                         download_status=DownloadStatus.PENDING
                     )
-                    
+
                     if self.db_manager.add_video(video_record):
                         new_videos += 1
-            
+
             self.logger.info(f"发现 {new_videos} 个新视频")
-            
+            if duplicate_videos > 0:
+                self.logger.warning(f"跳过 {duplicate_videos} 个重复视频")
+
             # 如果在服务器模式，自动下载新视频
             if self.server_mode and new_videos > 0:
                 self.auto_download_pending_videos()
@@ -471,20 +478,20 @@ class EnhancedVideoDownloaderApp:
         """运行交互模式"""
         while True:
             try:
-                # 显示增强菜单
+                # 显示优化的菜单
                 mode = self._show_enhanced_menu()
 
+                # 新的简化菜单处理程序
                 mode_handlers = {
-                    "1": self.handle_mode_1,
-                    "2": self.handle_mode_2,
-                    "3": self.handle_mode_3,
-                    "4": self.handle_mode_4,
-                    "5": self.handle_mode_5,
-                    "6": self.handle_mode_6,
-                    "7": self.handle_database_operations,
-                    "8": self.handle_cloud_operations,
-                    "9": self.handle_scheduler_operations,
-                    "10": self.show_statistics
+                    "1": self.handle_one_click_download,     # 一键下载
+                    "2": self.handle_smart_patch,            # 智能补漏
+                    "3": self.handle_video_management,       # 视频管理
+                    "4": self.handle_api_fetch,              # API数据获取
+                    "5": self.handle_local_file_management,  # 本地文件管理
+                    "6": self.handle_single_video_download,  # 下载单个视频
+                    "7": self.handle_database_operations,    # 数据库操作
+                    "8": self.handle_cloud_operations,       # 云存储管理
+                    "9": self.show_statistics                # 系统统计
                 }
 
                 if mode.lower() in ['q', 'quit', 'exit']:
@@ -504,32 +511,387 @@ class EnhancedVideoDownloaderApp:
                 self.logger.error(f"交互模式运行异常: {e}")
                 print(f"❌ 程序运行异常: {e}")
                 print("程序将继续运行，请重新选择功能")
-                import traceback
-                traceback.print_exc()
+
+    def handle_one_click_download(self):
+        """处理一键下载 - 获取新视频并自动下载"""
+        print("\n🚀 === 一键下载模式 ===")
+        print("📌 此功能将自动执行：获取API数据 → 检测新视频 → 批量下载")
+
+        confirm = input("确认开始一键下载? (y/n): ").strip().lower()
+        if confirm != 'y':
+            return
+
+        try:
+            # 步骤1：获取API数据
+            print("\n📊 步骤1: 从API获取最新数据...")
+            page_size = input("请输入获取数量 (默认50): ").strip() or "50"
+            try:
+                page_size = int(page_size)
+            except:
+                page_size = 50
+
+            api_data = self.api_client.fetch_posts_from_api(page_size, verify_ssl=False)
+            if not api_data:
+                print("❌ 无法获取API数据")
+                input("按 Enter 键继续...")
+                return
+
+            # 步骤2：提取并保存新视频
+            print("📋 步骤2: 提取视频信息...")
+            extracted_items = self.data_processor.extract_items_data(api_data)
+            if not extracted_items:
+                print("❌ 无法提取视频数据")
+                input("按 Enter 键继续...")
+                return
+
+            # 检查重复并保存到数据库
+            new_videos = 0
+            duplicate_videos = 0
+            for item in extracted_items:
+                video_id = item.get('id')
+                if not video_id:
+                    continue
+
+                # 检查是否已存在
+                existing_video = self.db_manager.get_video(video_id)
+                if existing_video:
+                    duplicate_videos += 1
+                else:
+                    video_record = VideoRecord(
+                        id=video_id,
+                        title=item.get('title', ''),
+                        url=item.get('url', ''),
+                        description=item.get('description', ''),
+                        cover=item.get('cover', ''),
+                        download_status=DownloadStatus.PENDING
+                    )
+
+                    if self.db_manager.add_video(video_record):
+                        new_videos += 1
+
+            print(f"✅ 发现 {new_videos} 个新视频")
+            if duplicate_videos > 0:
+                print(f"⚠️ 跳过 {duplicate_videos} 个重复视频")
+
+            if new_videos == 0:
+                print("没有新视频需要下载")
+                print("\n✅ 工作流程完成！")
+                input("按 Enter 键返回主菜单...")
+                return
+
+            # 步骤3：自动下载
+            print(f"\n⬇️ 步骤3: 开始下载 {new_videos} 个新视频...")
+            downloaded_count = self.auto_download_pending_videos()
+
+            print(f"\n🎉 一键下载完成!")
+            print(f"📊 下载统计: 成功 {downloaded_count}/{new_videos}")
+
+        except Exception as e:
+            print(f"❌ 一键下载过程中出错: {e}")
+
+        input("按 Enter 键继续...")
+
+    def handle_smart_patch(self):
+        """处理智能补漏 - 检测缺失并选择下载"""
+        print("\n🔍 === 智能补漏模式 ===")
+        print("📌 此功能将自动检测缺失的视频文件，并提供下载选项")
+
+        # 直接调用现有的下载缺失视频功能
+        self.handle_download_missing_videos()
+
+    def handle_video_management(self):
+        """处理视频管理 - 查看状态和批量操作"""
+        print("\n📊 === 视频管理中心 ===")
+
+        while True:
+            # 显示统计信息
+            stats = self.db_manager.get_statistics()
+            print(f"\n📈 当前状态:")
+            print(f"  📺 总视频: {stats.get('total', 0)}")
+            print(f"  ⏳ 待下载: {stats.get('pending', 0)}")
+            print(f"  ✅ 已完成: {stats.get('completed', 0)}")
+            print(f"  ❌ 失败: {stats.get('failed', 0)}")
+
+            print("\n🛠️ 管理选项:")
+            print("  1. 查看待下载视频")
+            print("  2. 查看已完成视频")
+            print("  3. 查看失败视频")
+            print("  4. 批量重试失败视频")
+            print("  5. 清理失败记录")
+            print("  6. 文件状态同步")
+            print("  0. 返回主菜单")
+
+            choice = input("请选择操作 (0-6): ").strip()
+
+            if choice == "0":
+                break
+            elif choice == "1":
+                videos = self.db_manager.get_videos_by_status(DownloadStatus.PENDING)
+                self._display_video_list(videos, "待下载视频")
+            elif choice == "2":
+                videos = self.db_manager.get_videos_by_status(DownloadStatus.COMPLETED)
+                self._display_video_list(videos, "已完成视频")
+            elif choice == "3":
+                videos = self.db_manager.get_videos_by_status(DownloadStatus.FAILED)
+                self._display_video_list(videos, "失败视频")
+            elif choice == "4":
+                self._handle_retry_failed_videos()
+            elif choice == "5":
+                count = self.db_manager.cleanup_failed_downloads()
+                print(f"✅ 清理了 {count} 个失败记录")
+                input("按 Enter 键继续...")
+            elif choice == "6":
+                self.handle_local_file_detection()
+            else:
+                print("❌ 无效选择")
+
+    def _handle_retry_failed_videos(self):
+        """处理重试失败的视频"""
+        failed_videos = self.db_manager.get_videos_by_status(DownloadStatus.FAILED)
+
+        if not failed_videos:
+            print("✅ 没有失败的视频需要重试")
+            input("按 Enter 键继续...")
+            return
+
+        print(f"\n📋 发现 {len(failed_videos)} 个失败的视频")
+        videos_with_url = [v for v in failed_videos if v.url]
+
+        if not videos_with_url:
+            print("❌ 没有可重试的视频(缺少URL)")
+            input("按 Enter 键继续...")
+            return
+
+        print(f"🔄 可重试视频: {len(videos_with_url)} 个")
+        confirm = input("确认重试所有失败的视频? (y/n): ").strip().lower()
+
+        if confirm == 'y':
+            # 重置状态为待下载
+            for video in videos_with_url:
+                self.db_manager.update_video_status(video.id, DownloadStatus.PENDING)
+
+            # 批量下载
+            self._download_all_missing_videos(videos_with_url)
+
+    def handle_api_fetch(self):
+        """处理API数据获取"""
+        print("\n📊 === API数据获取 ===")
+
+        page_size = input("请输入获取数量 (默认50): ").strip() or "50"
+        try:
+            page_size = int(page_size)
+        except:
+            page_size = 50
+
+        print(f"🔄 正在从API获取 {page_size} 条数据...")
+
+        try:
+            api_data = self.api_client.fetch_posts_from_api(page_size, verify_ssl=False)
+            if api_data:
+                # 保存API数据
+                with open(self.config.API_RESPONSE_FILE, 'w', encoding='utf-8') as f:
+                    json.dump(api_data, f, indent=2, ensure_ascii=False)
+                print(f"✅ 数据已保存到 {self.config.API_RESPONSE_FILE}")
+
+                # 提取视频信息
+                extracted_items = self.data_processor.extract_items_data(api_data)
+                if extracted_items:
+                    with open(self.config.EXTRACTED_ITEMS_FILE, 'w', encoding='utf-8') as f:
+                        json.dump(extracted_items, f, indent=2, ensure_ascii=False)
+                    print(f"✅ 提取的视频信息已保存到 {self.config.EXTRACTED_ITEMS_FILE}")
+                    print(f"📊 提取到 {len(extracted_items)} 个视频信息")
+                else:
+                    print("❌ 无法提取视频信息")
+            else:
+                print("❌ 无法获取API数据")
+        except Exception as e:
+            print(f"❌ API获取失败: {e}")
+
+        input("按 Enter 键继续...")
+
+    def handle_local_file_management(self):
+        """处理本地文件管理"""
+        print("\n📁 === 本地文件管理 ===")
+
+        while True:
+            print("\n🛠️ 文件管理选项:")
+            print("  1. 检测本地文件状态")
+            print("  2. 文件与数据库同步")
+            print("  3. 查看下载目录统计")
+            print("  4. 清理空文件")
+            print("  0. 返回主菜单")
+
+            choice = input("请选择操作 (0-4): ").strip()
+
+            if choice == "0":
+                break
+            elif choice == "1":
+                self.handle_local_file_detection()
+            elif choice == "2":
+                self.handle_file_database_sync()
+            elif choice == "3":
+                self._show_directory_stats()
+            elif choice == "4":
+                self._cleanup_empty_files()
+            else:
+                print("❌ 无效选择")
+
+    def _show_directory_stats(self):
+        """显示下载目录统计"""
+        print("\n📊 下载目录统计")
+
+        try:
+            download_dir = self.config.DEFAULT_DOWNLOADS_DIR
+            if not os.path.exists(download_dir):
+                print("❌ 下载目录不存在")
+                input("按 Enter 键继续...")
+                return
+
+            import glob
+            video_extensions = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']
+
+            total_files = 0
+            total_size = 0
+
+            print(f"\n📁 目录: {download_dir}")
+            print("=" * 50)
+
+            for ext in video_extensions:
+                pattern = os.path.join(download_dir, ext)
+                files = glob.glob(pattern)
+                if files:
+                    ext_size = sum(os.path.getsize(f) for f in files)
+                    total_files += len(files)
+                    total_size += ext_size
+                    print(f"  {ext.replace('*', '').upper()}: {len(files)} 个文件, {ext_size / (1024*1024):.1f} MB")
+
+            print("=" * 50)
+            print(f"📊 总计: {total_files} 个文件, {total_size / (1024*1024*1024):.2f} GB")
+
+        except Exception as e:
+            print(f"❌ 统计失败: {e}")
+
+        input("按 Enter 键继续...")
+
+    def _cleanup_empty_files(self):
+        """清理空文件"""
+        print("\n🗑️ 清理空文件")
+
+        try:
+            download_dir = self.config.DEFAULT_DOWNLOADS_DIR
+            if not os.path.exists(download_dir):
+                print("❌ 下载目录不存在")
+                input("按 Enter 键继续...")
+                return
+
+            import glob
+            video_extensions = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']
+
+            empty_files = []
+            for ext in video_extensions:
+                pattern = os.path.join(download_dir, ext)
+                files = glob.glob(pattern)
+                for file_path in files:
+                    if os.path.getsize(file_path) == 0:
+                        empty_files.append(file_path)
+
+            if empty_files:
+                print(f"🔍 发现 {len(empty_files)} 个空文件:")
+                for file_path in empty_files:
+                    print(f"  - {os.path.basename(file_path)}")
+
+                confirm = input("\n确认删除这些空文件? (y/n): ").strip().lower()
+                if confirm == 'y':
+                    for file_path in empty_files:
+                        os.remove(file_path)
+                    print(f"✅ 已删除 {len(empty_files)} 个空文件")
+            else:
+                print("✅ 没有发现空文件")
+
+        except Exception as e:
+            print(f"❌ 清理失败: {e}")
+
+        input("按 Enter 键继续...")
+
+    def handle_single_video_download(self):
+        """处理单个视频下载"""
+        print("\n🎬 === 单个视频下载 ===")
+
+        url = input("请输入M3U8视频URL: ").strip()
+        if not url:
+            print("❌ URL不能为空")
+            input("按 Enter 键继续...")
+            return
+
+        title = input("请输入视频标题 (可选): ").strip() or "单个下载视频"
+
+        print(f"\n⬇️ 开始下载: {title}")
+        try:
+            success = self.download_manager.download_m3u8_video(
+                url,
+                self.config.DEFAULT_DOWNLOADS_DIR,
+                title,
+                max_quality=True
+            )
+
+            if success:
+                print("✅ 下载成功!")
+            else:
+                print("❌ 下载失败")
+
+        except Exception as e:
+            print(f"❌ 下载异常: {e}")
+
+        input("按 Enter 键继续...")
+
+    def shutdown(self):
+        """安全关闭应用"""
+        try:
+            if hasattr(self, 'scheduler') and self.scheduler:
+                self.scheduler.stop()
+
+            if hasattr(self, 'db_manager') and self.db_manager:
+                self.db_manager.close()
+
+            # 清理PID文件
+            if hasattr(self, 'config') and os.path.exists(self.config.PID_FILE):
+                os.remove(self.config.PID_FILE)
+
+            self.logger.info("应用已安全关闭")
+        except Exception as e:
+            if hasattr(self, 'logger'):
+                self.logger.error(f"关闭应用时出错: {e}")
+
+    def run(self):
+        """主运行方法 - 根据模式选择运行方式"""
+        if self.server_mode:
+            self.run_server_mode()
+        else:
+            self.run_interactive_mode()
 
     def _show_enhanced_menu(self) -> str:
-        """显示增强版菜单"""
+        """显示优化的简洁菜单"""
         print("\n" + "="*60)
-        print("🎬 增强版视频下载器 v2.0")
+        print("🎬 视频下载器 v2.0")
         print("="*60)
-        print("📊 基本功能:")
-        print("  1. 完整工作流程 (API -> 提取 -> 显示 -> 下载)")
-        print("  2. 从本地JSON文件提取并下载")
-        print("  3. 仅从API获取数据")
-        print("  4. 下载单个m3u8视频")
-        print("  5. 批量下载视频")
-        print("  6. 交互式选择下载")
-        print("\n🚀 新增功能:")
-        print("  7. 数据库管理")
+        print("🚀 快速操作:")
+        print("  1. 一键下载 (获取新视频 + 自动下载)")
+        print("  2. 智能补漏 (检测缺失 + 选择下载)")
+        print("  3. 视频管理 (查看状态 + 批量操作)")
+        print("\n📊 详细功能:")
+        print("  4. API数据获取")
+        print("  5. 本地文件管理")
+        print("  6. 下载单个视频")
+        print("\n⚙️ 系统管理:")
+        print("  7. 数据库操作")
         print("  8. 云存储管理")
-        print("  9. 定时任务管理")
-        print(" 10. 统计信息")
-        print("\n💡 输入 q/quit/exit 退出程序")
+        print("  9. 系统统计")
+        print("\n💡 输入 q 退出程序")
         print("="*60)
-        
-        choice = input("请选择功能 (1-10): ").strip()
+
+        choice = input("请选择功能 (1-9): ").strip()
         return choice
-    
+
     def handle_database_operations(self):
         """处理数据库操作"""
         print("\n=== 数据库管理 ===")
@@ -557,7 +919,6 @@ class EnhancedVideoDownloaderApp:
             self._display_video_list(videos, "已完成")
         elif choice == "4":
             keyword = input("请输入搜索关键词: ").strip()
-            # 这里可以扩展搜索功能
             print("搜索功能待实现")
         elif choice == "5":
             count = self.db_manager.cleanup_failed_downloads()
@@ -578,7 +939,6 @@ class EnhancedVideoDownloaderApp:
         print("\n=== 本地文件检测 ===")
         print("🔍 正在分析文件与数据库记录的对应关系...")
 
-        # 实现文件检测逻辑
         sync_stats = self.db_manager.sync_database_with_local_files(self.config.DEFAULT_DOWNLOADS_DIR)
 
         if sync_stats:
@@ -593,7 +953,6 @@ class EnhancedVideoDownloaderApp:
     def handle_file_database_sync(self):
         """处理文件与数据库同步"""
         print("\n=== 文件与数据库同步 ===")
-        # 实现同步逻辑
         print("同步功能待实现")
         input("按 Enter 键继续...")
 
@@ -601,7 +960,6 @@ class EnhancedVideoDownloaderApp:
         """处理下载缺失视频文件"""
         print("\n=== 下载缺失的视频文件 ===")
 
-        # 首先同步数据库状态
         print("🔄 正在同步数据库状态...")
         sync_stats = self.db_manager.sync_database_with_local_files(self.config.DEFAULT_DOWNLOADS_DIR)
 
@@ -612,7 +970,6 @@ class EnhancedVideoDownloaderApp:
             print(f"  📝 创建新记录: {sync_stats['created_from_files']}")
             print(f"  🔗 文件匹配: {sync_stats['files_matched']}")
 
-        # 获取缺失文件的视频
         missing_videos = self.db_manager.get_videos_missing_files()
 
         if not missing_videos:
@@ -623,11 +980,10 @@ class EnhancedVideoDownloaderApp:
         print(f"\n🔍 发现 {len(missing_videos)} 个缺失文件的视频:")
         print("=" * 80)
 
-        # 显示缺失的视频列表
         for i, video in enumerate(missing_videos[:20], 1):
             status_emoji = {
                 DownloadStatus.PENDING: "⏳",
-                DownloadStatus.COMPLETED: "💔",  # 标记为完成但文件不存在
+                DownloadStatus.COMPLETED: "💔",
                 DownloadStatus.FAILED: "❌"
             }.get(video.download_status, "❓")
 
@@ -686,10 +1042,8 @@ class EnhancedVideoDownloaderApp:
             print(f"\n[{i}/{len(videos_with_url)}] 下载: {video.title}")
 
             try:
-                # 更新状态为下载中
                 self.db_manager.update_video_status(video.id, DownloadStatus.DOWNLOADING)
 
-                # 执行下载
                 success = self.download_manager.download_m3u8_video(
                     video.url,
                     self.config.DEFAULT_DOWNLOADS_DIR,
@@ -699,7 +1053,6 @@ class EnhancedVideoDownloaderApp:
                 )
 
                 if success:
-                    # 查找下载的文件
                     download_path = self._find_downloaded_file(video.title, video.id)
                     if download_path:
                         file_size = os.path.getsize(download_path)
@@ -767,7 +1120,6 @@ class EnhancedVideoDownloaderApp:
                 break
 
             try:
-                # 解析选择
                 selected_indices = self._parse_video_selection(selection, len(videos_with_url))
                 if selected_indices:
                     selected_videos = [videos_with_url[i-1] for i in selected_indices]
@@ -777,7 +1129,6 @@ class EnhancedVideoDownloaderApp:
             except:
                 print("❌ 输入格式错误，请重新输入")
 
-        # 确认并下载
         print(f"\n📋 您选择了 {len(selected_videos)} 个视频:")
         for i, video in enumerate(selected_videos[:5], 1):
             print(f"  [{i}] {video.title}")
@@ -801,12 +1152,10 @@ class EnhancedVideoDownloaderApp:
                     continue
 
                 if '-' in part:
-                    # 范围选择
                     start, end = map(int, part.split('-', 1))
                     if 1 <= start <= max_count and 1 <= end <= max_count and start <= end:
                         selections.extend(range(start, end + 1))
                 else:
-                    # 单个数字
                     num = int(part)
                     if 1 <= num <= max_count:
                         selections.append(num)
@@ -833,53 +1182,11 @@ class EnhancedVideoDownloaderApp:
         print("云存储功能待实现")
         input("按 Enter 键继续...")
 
-    def handle_scheduler_operations(self):
-        """处理定时任务操作"""
-        print("\n=== 定时任务管理 ===")
-        print("定时任务功能待实现")
-        input("按 Enter 键继续...")
-
     def show_statistics(self):
         """显示统计信息"""
         print("\n=== 统计信息 ===")
         stats = self.db_manager.get_statistics()
         print(json.dumps(stats, indent=2, ensure_ascii=False))
-        input("按 Enter 键继续...")
-
-    def handle_mode_1(self):
-        """处理模式1：完整工作流程"""
-        print("\n=== 完整工作流程 ===")
-        # 实现完整工作流程
-        input("按 Enter 键继续...")
-
-    def handle_mode_2(self):
-        """处理模式2：从本地JSON文件提取并下载"""
-        print("\n=== 从本地JSON文件提取并下载 ===")
-        # 实现从本地文件提取
-        input("按 Enter 键继续...")
-
-    def handle_mode_3(self):
-        """处理模式3：仅从API获取数据"""
-        print("\n=== 仅从API获取数据 ===")
-        # 实现API获取数据
-        input("按 Enter 键继续...")
-
-    def handle_mode_4(self):
-        """处理模式4：下载单个m3u8视频"""
-        print("\n=== 下载单个m3u8视频 ===")
-        # 实现单个视频下载
-        input("按 Enter 键继续...")
-
-    def handle_mode_5(self):
-        """处理模式5：批量下载视频"""
-        print("\n=== 批量下载视频 ===")
-        # 实现批量下载
-        input("按 Enter 键继续...")
-
-    def handle_mode_6(self):
-        """处理模式6：交互式选择下载"""
-        print("\n=== 交互式选择下载 ===")
-        # 实现交互式选择下载
         input("按 Enter 键继续...")
 
     def _display_video_list(self, videos: List[VideoRecord], title: str = "视频列表"):
@@ -908,34 +1215,4 @@ class EnhancedVideoDownloaderApp:
         if len(videos) > 20:
             print(f"... 还有 {len(videos) - 20} 个视频")
 
-        is_duplicates = input("是否查看重复视频的详情? (y/n): ").strip().lower() == 'y'
-        if is_duplicates:
-            # 显示重复视频详情逻辑
-            pass
-
         input("按 Enter 键返回主菜单...")
-
-    def shutdown(self):
-        """安全关闭应用"""
-        try:
-            if hasattr(self, 'scheduler') and self.scheduler:
-                self.scheduler.stop()
-
-            if hasattr(self, 'db_manager') and self.db_manager:
-                self.db_manager.close()
-
-            # 清理PID文件
-            if hasattr(self, 'config') and os.path.exists(self.config.PID_FILE):
-                os.remove(self.config.PID_FILE)
-
-            self.logger.info("应用已安全关闭")
-        except Exception as e:
-            if hasattr(self, 'logger'):
-                self.logger.error(f"关闭应用时出错: {e}")
-
-    def run(self):
-        """主运行方法 - 根据模式选择运行方式"""
-        if self.server_mode:
-            self.run_server_mode()
-        else:
-            self.run_interactive_mode()

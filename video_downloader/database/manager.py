@@ -319,29 +319,183 @@ class DatabaseManager:
                 }
 
     def _find_matching_file(self, video: VideoRecord, local_files: List[str]) -> Optional[str]:
-        """为视频记录找到匹配的本地文件"""
-        # 清理标题和ID用于匹配
-        safe_title = re.sub(r'[^\w\s-]', '', video.title)[:50] if video.title else ''
-        safe_id = re.sub(r'[^\w-]', '', video.id)[:20] if video.id else ''
+        """为视频记录查找匹配的本地文件"""
+        if not video.title:
+            return None
+
+        # 清理标题用于匹配
+        clean_title = re.sub(r'[<>:"/\\|?*]', '', video.title)
+        clean_title = clean_title.strip()
 
         for file_path in local_files:
-            filename = os.path.basename(file_path).lower()
+            filename = os.path.basename(file_path)
+            filename_without_ext = os.path.splitext(filename)[0]
 
-            # 按标题匹配
-            if safe_title and safe_title.lower() in filename:
+            # 多种匹配策略
+            if self._is_title_match(clean_title, filename_without_ext):
                 return file_path
 
-            # 按ID匹配
-            if safe_id and safe_id.lower() in filename:
+            # 通过视频ID匹配
+            if video.id and video.id in filename_without_ext:
                 return file_path
 
         return None
+
+    def _is_title_match(self, title: str, filename: str) -> bool:
+        """判断标题是否与文件名匹配"""
+        if not title or not filename:
+            return False
+
+        # 移除特殊字符进行比较
+        title_clean = re.sub(r'[^\w\s]', '', title.lower())
+        filename_clean = re.sub(r'[^\w\s]', '', filename.lower())
+
+        # 提取关键词进行匹配
+        title_words = set(title_clean.split())
+        filename_words = set(filename_clean.split())
+
+        # 如果标题词汇有50%以上出现在文件名中，认为匹配
+        if len(title_words) > 0:
+            match_ratio = len(title_words & filename_words) / len(title_words)
+            return match_ratio >= 0.5
+
+        # 子串匹配
+        if len(title_clean) > 10:
+            return title_clean[:20] in filename_clean or filename_clean[:20] in title_clean
+
+        return False
 
     def _generate_id_from_filename(self, filename: str) -> str:
         """从文件名生成视频ID"""
         import hashlib
         # 使用文件名的MD5哈希作为ID
-        return hashlib.md5(filename.encode()).hexdigest()[:16]
+        name_without_ext = os.path.splitext(filename)[0]
+        return hashlib.md5(name_without_ext.encode('utf-8')).hexdigest()[:16]
+
+    def get_videos_missing_files(self) -> List[VideoRecord]:
+        """获取缺失文件的视频记录（改进版）"""
+        with self._lock:
+            try:
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
+
+                    # 获取所有视频记录
+                    cursor.execute('''
+                        SELECT * FROM videos 
+                        ORDER BY created_at DESC
+                    ''')
+
+                    rows = cursor.fetchall()
+                    missing_videos = []
+
+                    for row in rows:
+                        video = self._row_to_video_record(row)
+
+                        # 检查文件是否存在
+                        file_exists = False
+                        if video.file_path and os.path.exists(video.file_path):
+                            file_exists = True
+
+                        # 如果数据库记录显示已完成但文件不存在，或者状态为待下载
+                        if ((video.download_status == DownloadStatus.COMPLETED and not file_exists) or
+                            video.download_status == DownloadStatus.PENDING):
+                            missing_videos.append(video)
+
+                    return missing_videos
+
+            except sqlite3.Error as e:
+                print(f"❌ 获取缺失文件的视频失败: {e}")
+                return []
+
+    def check_local_files_status(self, download_dir: str) -> Dict[str, Any]:
+        """检查本地文件状态并提供详细报告"""
+        if not os.path.exists(download_dir):
+            return {
+                'error': f'下载目录不存在: {download_dir}',
+                'files_in_db': 0,
+                'files_on_disk': 0,
+                'matched_files': 0,
+                'orphaned_files': 0,
+                'missing_files': 0
+            }
+
+        with self._lock:
+            try:
+                # 获取所有视频记录
+                all_videos = self.get_all_videos()
+
+                # 获取下载目录中的所有视频文件
+                video_extensions = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']
+                local_files = []
+
+                for ext in video_extensions:
+                    pattern = os.path.join(download_dir, '**', ext)
+                    local_files.extend(glob.glob(pattern, recursive=True))
+
+                # 统计信息
+                stats = {
+                    'files_in_db': len(all_videos),
+                    'files_on_disk': len(local_files),
+                    'matched_files': 0,
+                    'orphaned_files': 0,
+                    'missing_files': 0,
+                    'details': {
+                        'matched': [],
+                        'orphaned': [],
+                        'missing': []
+                    }
+                }
+
+                # 检查数据库中的每个视频
+                matched_files = set()
+                for video in all_videos:
+                    found_file = None
+
+                    # 检查记录的文件路径
+                    if video.file_path and os.path.exists(video.file_path):
+                        found_file = video.file_path
+                    else:
+                        # 尝试匹配本地文件
+                        found_file = self._find_matching_file(video, local_files)
+
+                    if found_file:
+                        stats['matched_files'] += 1
+                        matched_files.add(found_file)
+                        stats['details']['matched'].append({
+                            'video_id': video.id,
+                            'title': video.title,
+                            'file_path': found_file,
+                            'status': video.download_status.value
+                        })
+                    else:
+                        stats['missing_files'] += 1
+                        stats['details']['missing'].append({
+                            'video_id': video.id,
+                            'title': video.title,
+                            'recorded_path': video.file_path,
+                            'status': video.download_status.value
+                        })
+
+                # 检查孤立文件（在磁盘上但不在数据库中）
+                for file_path in local_files:
+                    if file_path not in matched_files:
+                        stats['orphaned_files'] += 1
+                        stats['details']['orphaned'].append({
+                            'file_path': file_path,
+                            'size_mb': os.path.getsize(file_path) / (1024 * 1024)
+                        })
+
+                return stats
+
+            except Exception as e:
+                return {
+                    'error': f'检查文件状态失败: {e}',
+                    'files_in_db': 0,
+                    'files_on_disk': 0,
+                    'matched_files': 0,
+                    'orphaned_files': 0,
+                    'missing_files': 0
+                }
 
     def update_video_status(self, video_id: str, status: DownloadStatus,
                            file_path: str = None, file_size: int = None) -> bool:
