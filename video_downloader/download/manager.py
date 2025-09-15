@@ -25,6 +25,47 @@ class DownloadManager:
         self.config = Config()
         self.temp_dir = tempfile.mkdtemp(prefix="video_download_")
 
+    def sanitize_filename(self, filename: str) -> str:
+        """
+        清理文件名，去除不合法字符和标签
+
+        Args:
+            filename (str): 原始文件名
+
+        Returns:
+            str: 清理后的安全文件名
+        """
+        if not filename:
+            return "unnamed"
+
+        # 去除换行符和回车符
+        filename = filename.replace('\n', '').replace('\r', '')
+
+        # 去除多余的空白符（包括制表符等）
+        filename = re.sub(r'\s+', ' ', filename)
+
+        # 去除所有#标签（包括#逆愛等）
+        filename = re.sub(r'#[^\s]*', '', filename)
+
+        # 去除Windows文件名不允许的字符
+        filename = re.sub(r'[<>:"/\\|?*]', '', filename)
+
+        # 去除首尾空白和点号
+        filename = filename.strip().strip('.')
+
+        # 去除连续的空格
+        filename = re.sub(r'\s{2,}', ' ', filename)
+
+        # 如果清理后为空，使用默认名称
+        if not filename:
+            return "unnamed"
+
+        # 限制长度，避免文件名过长
+        if len(filename) > 100:
+            filename = filename[:100]
+
+        return filename
+
     def check_ffmpeg(self) -> bool:
         """检查ffmpeg是否可用"""
         try:
@@ -216,12 +257,16 @@ class DownloadManager:
         try:
             print(f"\n🎬 开始下载: {video.title} ({video.video_date})")
 
+            # 清理标题作为安全的文件名
+            safe_title = self.sanitize_filename(video.title)
+            safe_date = self.sanitize_filename(video.video_date)
+
             # 创建视频专用目录
-            video_dir = os.path.join(download_dir, f"{video.title}_{video.video_date}")
+            video_dir = os.path.join(download_dir, f"{safe_title}_{safe_date}")
             os.makedirs(video_dir, exist_ok=True)
 
             # 创建临时目录
-            temp_dir = tempfile.mkdtemp(prefix=f"download_{video.video_date}_")
+            temp_dir = tempfile.mkdtemp(prefix=f"download_{safe_date}_")
 
             try:
                 # 1. 下载封面图片
@@ -235,7 +280,7 @@ class DownloadManager:
                     return False
 
                 # 3. 合并音视频并嵌入封面
-                output_filename = f"{video.title}_{video.video_date}.mp4"
+                output_filename = f"{safe_title}_{safe_date}.mp4"
                 output_path = os.path.join(video_dir, output_filename)
 
                 success = self.merge_video_with_cover(

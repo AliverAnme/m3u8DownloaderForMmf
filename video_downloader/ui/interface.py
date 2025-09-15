@@ -50,6 +50,23 @@ class UserInterface:
                 return choice
             print("❌ 无效输入，请输入1-6之间的数字")
 
+    def show_api_menu(self) -> str:
+        """显示API操作子菜单并获取用户输入"""
+        print("\n" + "="*60)
+        print("🔄 【API解析操作子菜单】")
+        print("="*60)
+        print("1. 基础API解析（单次请求）")
+        print("2. 带重试机制的API解析")
+        print("3. 多页API解析（支持重试）")
+        print("4. 返回主菜单")
+        print("-"*60)
+
+        while True:
+            choice = input("请输入操作编号（1-4）: ").strip()
+            if choice in ['1', '2', '3', '4']:
+                return choice
+            print("❌ 无效输入，请输入1-4之间的数字")
+
     def get_video_date_input(self, prompt: str = "请输入视频日期（4位数字，如0714）") -> str:
         """获取视频日期输入"""
         while True:
@@ -260,5 +277,64 @@ class UserInterface:
                     return size
                 else:
                     print("❌ 请输入1-200之间的数字")
+            except ValueError:
+                print("❌ 请输入有效的数字")
+
+    def get_retry_count_input(self) -> int:
+        """获取重试次数输入"""
+        while True:
+            try:
+                retry_input = input("请输入最大重试次数（默认3次，范围1-10）: ").strip()
+                if not retry_input:
+                    return 3  # 默认值
+                retry_count = int(retry_input)
+                if 1 <= retry_count <= 10:
+                    return retry_count
+                else:
+                    print("❌ 重试次数必须在1-10之间")
+            except ValueError:
+                print("❌ 请输入有效的数字")
+
+    def get_retry_delay_input(self) -> float:
+        """获取重试延迟时间输入"""
+        while True:
+            try:
+                delay_input = input("请输入重试延迟时间（默认1.0秒，范围0.1-10.0）: ").strip()
+                if not delay_input:
+                    return 1.0  # 默认值
+                delay = float(delay_input)
+                if 0.1 <= delay <= 10.0:
+                    return delay
+                else:
+                    print("❌ 延迟时间必须在0.1-10.0秒之间")
+            except ValueError:
+                print("❌ 请输入有效的数字")
+
+    def get_pages_input(self) -> str:
+        """获取页码输入"""
+        print("\n📄 页码输入格式说明:")
+        print("  - 单个页码: 1")
+        print("  - 多个页码: 1,3,5")
+        print("  - 页码范围: 1-5")
+        print("  - 混合格式: 1,3-5,8")
+
+        while True:
+            pages_input = input("请输入要获取的页码: ").strip()
+            if pages_input:
+                return pages_input
+            print("❌ 页码输入不能为空")
+
+    def get_page_delay_input(self) -> float:
+        """获取页面间延迟时间输入"""
+        while True:
+            try:
+                delay_input = input("请输入页面间延迟时间（默认0.5秒，范围0.1-5.0）: ").strip()
+                if not delay_input:
+                    return 0.5  # 默认值
+                delay = float(delay_input)
+                if 0.1 <= delay <= 5.0:
+                    return delay
+                else:
+                    print("❌ 页面间延迟时间必须在0.1-5.0秒之间")
             except ValueError:
                 print("❌ 请输入有效的数字")
