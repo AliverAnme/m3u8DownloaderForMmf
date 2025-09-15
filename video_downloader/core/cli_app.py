@@ -3,13 +3,13 @@
 """
 
 import os
+import importlib
 from typing import List
 
 from ..api.client import APIClient
 from ..database.manager import DatabaseManager
 from ..database.models import VideoRecord
 from ..download.manager import DownloadManager
-from ..ui.interface import UserInterface
 from ..core.config import Config
 
 
@@ -25,6 +25,11 @@ class CLIVideoDownloaderApp:
         os.makedirs(self.config.LOGS_DIR, exist_ok=True)
         os.makedirs(self.config.TEMP_DIR, exist_ok=True)
         os.makedirs(self.config.DEFAULT_DOWNLOADS_DIR, exist_ok=True)
+
+        # 动态导入UI模块以确保获取最新版本
+        ui_module = importlib.import_module('video_downloader.ui.interface')
+        importlib.reload(ui_module)
+        UserInterface = getattr(ui_module, 'UserInterface')
 
         self.ui = UserInterface()
         self.api_client = APIClient()
@@ -88,11 +93,28 @@ class CLIVideoDownloaderApp:
 
     def handle_api_parsing(self):
         """处理API解析操作"""
+        while True:
+            choice = self.ui.show_api_menu()
+
+            if choice == '1':
+                self.handle_basic_api_parsing()
+            elif choice == '2':
+                self.handle_api_parsing_with_retry()
+            elif choice == '3':
+                self.handle_multi_page_api_parsing()
+            elif choice == '4':
+                break
+
+            if choice != '4':
+                self.ui.wait_for_enter()
+
+    def handle_basic_api_parsing(self):
+        """处理基础API解析操作"""
         try:
             # 获取API size参数
             size = self.ui.get_api_size_input(self.config.DEFAULT_PAGE_SIZE)
 
-            self.ui.show_info(f"开始执行API解析，请求 {size} 条数据...")
+            self.ui.show_info(f"开始执行基础API解析，请求 {size} 条数据...")
 
             # 获取API数据并解析
             video_records = self.api_client.fetch_and_parse_videos(size)
@@ -101,6 +123,107 @@ class CLIVideoDownloaderApp:
                 self.ui.show_warning("未获取到任何视频数据")
                 return
 
+            self._process_video_records(video_records)
+
+        except Exception as e:
+            self.ui.show_error(f"基础API解析失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def handle_api_parsing_with_retry(self):
+        """处理带重试机制的API解析操作"""
+        try:
+            # 获取参数
+            size = self.ui.get_api_size_input(self.config.DEFAULT_PAGE_SIZE)
+            max_retries = self.ui.get_retry_count_input()
+            retry_delay = self.ui.get_retry_delay_input()
+
+            self.ui.show_info(f"开始执行带重试的API解析...")
+            self.ui.show_info(f"请求数据条数: {size}")
+            self.ui.show_info(f"最大重试次数: {max_retries}")
+            self.ui.show_info(f"重试延迟: {retry_delay} 秒")
+
+            # 使用重试机制获取API数据并解析
+            video_records = self.api_client.fetch_and_parse_videos_with_retry(
+                size=size,
+                max_retries=max_retries,
+                retry_delay=retry_delay
+            )
+
+            if not video_records:
+                self.ui.show_warning("重试后仍未获取到任何视频数据")
+                return
+
+            self._process_video_records(video_records)
+
+        except Exception as e:
+            self.ui.show_error(f"带重试的API解析失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def handle_multi_page_api_parsing(self):
+        """处理多页API解析操作"""
+        try:
+            # 获取参数
+            pages_input = self.ui.get_pages_input()
+            size = self.ui.get_api_size_input(self.config.DEFAULT_PAGE_SIZE)
+            max_retries = self.ui.get_retry_count_input()
+            page_delay = self.ui.get_page_delay_input()
+
+            # 解析页码
+            pages = self._parse_pages_input(pages_input)
+            if not pages:
+                self.ui.show_warning("页码输入格式错误")
+                return
+
+            self.ui.show_info(f"开始执行多页API解析...")
+            self.ui.show_info(f"页码: {pages}")
+            self.ui.show_info(f"每页数据条数: {size}")
+            self.ui.show_info(f"每页重试次数: {max_retries}")
+            self.ui.show_info(f"页面间延迟: {page_delay} 秒")
+
+            # 使用多页重试机制获取API数据
+            video_records = self.api_client.fetch_multiple_pages_with_retry(
+                pages=pages,
+                size=size,
+                max_retries=max_retries,
+                page_delay=page_delay
+            )
+
+            if not video_records:
+                self.ui.show_warning("多页请求后仍未获取到任何视频数据")
+                return
+
+            self._process_video_records(video_records)
+
+        except Exception as e:
+            self.ui.show_error(f"多页API解析失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _parse_pages_input(self, pages_input: str) -> List[int]:
+        """解析页码输入"""
+        try:
+            pages = []
+            parts = pages_input.split(',')
+
+            for part in parts:
+                part = part.strip()
+                if '-' in part:
+                    # 范围格式：1-5
+                    start, end = map(int, part.split('-'))
+                    pages.extend(range(start, end + 1))
+                else:
+                    # 单个页码
+                    pages.append(int(part))
+
+            return sorted(list(set(pages)))  # 去重并排序
+        except:
+            return []
+
+    def _process_video_records(self, video_records: List[VideoRecord]):
+        """处理视频记录的通用方法"""
+        try:
             # 检查重复数据
             unique_keys = set()
             unique_records = []

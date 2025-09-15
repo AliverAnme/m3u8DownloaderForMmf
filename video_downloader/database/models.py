@@ -31,14 +31,42 @@ class VideoRecord:
         self.is_primer = not bool(self.url)
 
     @classmethod
-    def from_api_data(cls, item_data: dict) -> 'VideoRecord':
+    def from_api_data(cls, item_data) -> 'VideoRecord':
         """从API数据创建VideoRecord实例"""
+        # 数据类型验证
+        if not isinstance(item_data, dict):
+            raise ValueError(f"期望字典类型，但收到 {type(item_data).__name__}: {item_data}")
+
+        # 检查必要字段是否存在
+        if not item_data:
+            raise ValueError("API数据为空")
+
         description = item_data.get('description', '')
         cover = item_data.get('cover', '')
         url = item_data.get('url', '')
 
+        # 增强的description验证
+        if not description or not isinstance(description, str):
+            # 尝试从其他字段获取描述信息
+            description_candidates = [
+                item_data.get('title', ''),
+                item_data.get('content', ''),
+                item_data.get('text', ''),
+                str(item_data.get('desc', ''))
+            ]
+            description = next((desc for desc in description_candidates
+                              if desc and isinstance(desc, str) and len(desc.strip()) > 0), '')
+
+            if not description:
+                raise ValueError("无法找到有效的描述信息")
+
         # 提取title：截取description中"开头至第一个空格#"的内容
         title = cls._extract_title(description)
+
+        # 如果标题提取失败或为空，再次尝试其他方法
+        if not title or len(title.strip()) == 0:
+            # 尝试更宽松的提取方法
+            title = cls._extract_title_fallback(description)
 
         # 提取video_date：从description中提取"连续4位数字"
         video_date = cls._extract_video_date(description)
@@ -98,6 +126,15 @@ class VideoRecord:
 
         # 应用标题清理
         return VideoRecord._clean_title(raw_title)
+
+    @staticmethod
+    def _extract_title_fallback(description: str) -> str:
+        """从描述中提取标题的备用方法"""
+        if not description:
+            return ""
+
+        # 直接返回清理后的描述作为标题
+        return VideoRecord._clean_title(description)
 
     @staticmethod
     def _extract_video_date(description: str) -> str:

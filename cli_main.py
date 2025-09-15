@@ -5,9 +5,24 @@
 
 import sys
 import os
+import importlib
 
 # 将项目根目录添加到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+# 清除可能的模块缓存
+def clear_module_cache():
+    """清除video_downloader相关的模块缓存"""
+    modules_to_remove = []
+    for module_name in sys.modules:
+        if module_name.startswith('video_downloader'):
+            modules_to_remove.append(module_name)
+
+    for module_name in modules_to_remove:
+        del sys.modules[module_name]
+
+# 清除缓存并重新导入
+clear_module_cache()
 
 from video_downloader.core.cli_app import CLIVideoDownloaderApp
 
