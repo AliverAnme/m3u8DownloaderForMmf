@@ -52,6 +52,37 @@ class VideoRecord:
         )
 
     @staticmethod
+    def _clean_title(title: str) -> str:
+        """
+        清理标题，去除换行符、多余空白符和特定标签
+
+        Args:
+            title (str): 原始标题
+
+        Returns:
+            str: 清理后的标题
+        """
+        if not title:
+            return ""
+
+        # 去除换行符和回车符
+        title = title.replace('\n', '').replace('\r', '')
+
+        # 去除多余的空白符（包括制表符等）
+        title = re.sub(r'\s+', ' ', title)
+
+        # 去除所有#标签（包括#逆愛等）
+        title = re.sub(r'#[^\s]*', '', title)
+
+        # 去除首尾空白
+        title = title.strip()
+
+        # 去除连续的空格
+        title = re.sub(r'\s{2,}', ' ', title)
+
+        return title
+
+    @staticmethod
     def _extract_title(description: str) -> str:
         """从描述中提取标题"""
         if not description:
@@ -60,10 +91,13 @@ class VideoRecord:
         # 查找第一个" #"的位置
         hash_index = description.find(' #')
         if hash_index != -1:
-            return description[:hash_index].strip()
+            raw_title = description[:hash_index].strip()
         else:
             # 如果没有找到" #"，返回整个描述作为标题
-            return description.strip()
+            raw_title = description.strip()
+
+        # 应用标题清理
+        return VideoRecord._clean_title(raw_title)
 
     @staticmethod
     def _extract_video_date(description: str) -> str:

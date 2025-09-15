@@ -35,6 +35,36 @@ class DataProcessor:
             print(f"读取文件时发生错误: {e}")
             return {}
 
+    def clean_title(self, title: str) -> str:
+        """
+        清理标题，去除换行符、多余空白符和特定标签
+
+        Args:
+            title (str): 原始标题
+
+        Returns:
+            str: 清理后的标题
+        """
+        if not title:
+            return ""
+
+        # 去除换行符和回车符
+        title = title.replace('\n', '').replace('\r', '')
+
+        # 去除多余的空白符（包括制表符等）
+        title = re.sub(r'\s+', ' ', title)
+
+        # 去除所有#标签（包括#逆愛等）
+        title = re.sub(r'#[^\s]*', '', title)
+
+        # 去除首尾空白
+        title = title.strip()
+
+        # 去除连续的空格
+        title = re.sub(r'\s{2,}', ' ', title)
+
+        return title
+
     def extract_title_from_description(self, description: str) -> str:
         """
         从description中提取标题内容
@@ -54,17 +84,18 @@ class DataProcessor:
         if match1:
             title = match1.group(0).strip()
             title = re.sub(r'\s*#.*$', '', title).strip()
-            return title
+            return self.clean_title(title)
 
         # 方法2: 如果没有【】格式，提取第一个#之前的内容
         pattern2 = r'^([^#]+?)(?:\s*#|$)'
         match2 = re.search(pattern2, description)
         if match2:
             title = match2.group(1).strip()
-            return title
+            return self.clean_title(title)
 
         # 方法3: 如果都没有匹配，返回前100个字符
-        return description[:100] + "..." if len(description) > 100 else description
+        raw_title = description[:100] + "..." if len(description) > 100 else description
+        return self.clean_title(raw_title)
 
     def extract_items_data(self, json_data: Dict[str, Any]) -> List[Dict[str, Any]]:
         """
