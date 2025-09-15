@@ -1,3 +1,5 @@
+import os
+
 class Config:
     """配置常量"""
     # API配置
@@ -6,10 +8,29 @@ class Config:
     DEFAULT_PAGE_SIZE = 50
     API_TIMEOUT = 30
 
+    # 请求头配置
+    DEFAULT_HEADERS = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+        'Accept': 'application/json, text/plain, */*',
+        'Accept-Language': 'zh-CN,zh;q=0.9,en;q=0.8',
+        'Accept-Encoding': 'gzip, deflate, br',
+        'Connection': 'keep-alive',
+        'Upgrade-Insecure-Requests': '1'
+    }
+
+    # 文件路径配置
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    DATA_DIR = os.path.join(BASE_DIR, "data")
+    LOGS_DIR = os.path.join(BASE_DIR, "logs")
+    TEMP_DIR = os.path.join(BASE_DIR, "temp")
+    
     # 文件名配置
-    API_RESPONSE_FILE = "api_response.json"
-    EXTRACTED_ITEMS_FILE = "extracted_items.json"
-    DEFAULT_DOWNLOADS_DIR = "downloads"
+    API_RESPONSE_FILE = os.path.join(DATA_DIR, "api_response.json")
+    EXTRACTED_ITEMS_FILE = os.path.join(DATA_DIR, "extracted_items.json")
+    DATABASE_FILE = os.path.join(DATA_DIR, "video_downloader.db")
+    
+    # 下载目录配置
+    DEFAULT_DOWNLOADS_DIR = os.path.join(os.path.dirname(BASE_DIR), "downloads")
 
     # 下载配置
     MAX_RETRIES = 3
@@ -17,7 +38,7 @@ class Config:
     DOWNLOAD_DELAY = 2  # 下载间隔秒数
     FFMPEG_TIMEOUT = 600
 
-    # FFmpeg 参数配置 - 改为字典格式
+    # FFmpeg 参数配置
     FFMPEG_PARAMS = {
         'video_codec': 'libx264',
         'audio_codec': 'aac',
@@ -25,41 +46,40 @@ class Config:
         'crf': '23'
     }
 
-    # 数据库配置
-    DATABASE_FILE = "video_downloader.db"
+    # 视频处理配置
+    TEMP_DIR_PREFIX = "video_download_"
+    COVER_FORMATS = ['.jpg', '.png', '.webp']
+    OUTPUT_FORMAT = 'mp4'
+    
+    # 文件名模式配置
+    FILENAME_PATTERNS = [
+        "{title}_{video_date}.{ext}",
+        "{title}.{ext}",
+        "{video_date}_{title}.{ext}"
+    ]
 
     # 定时任务配置
     SCHEDULER_CONFIG = {
-        'fetch_interval_minutes': 120,  # 2小时获取一次新数据
-        'upload_interval_minutes': 60,  # 1小时检查一次上传
-        'cleanup_time': "03:00",        # 凌晨3点清理
-        'auto_start': False,            # 默认不自动启动调度器
-        'log_file': "scheduler.log"
+        'fetch_interval_minutes': 120,
+        'upload_interval_minutes': 60,
+        'cleanup_time': "03:00",
+        'auto_start': False,
+        'log_file': os.path.join(LOGS_DIR, "scheduler.log")
     }
 
     # 云存储配置
-    CLOUD_CONFIG_FILE = "cloud_config.json"
-    CLOUD_UPLOAD_ENABLED = False  # 默认关闭云存储
-    CLOUD_AUTO_UPLOAD = False     # 默认不自动上传
+    CLOUD_CONFIG_FILE = os.path.join(DATA_DIR, "cloud_config.json")
+    CLOUD_UPLOAD_ENABLED = False
+    CLOUD_AUTO_UPLOAD = False
 
     # 服务器部署配置
-    SERVER_MODE = False  # 服务器模式，无交互界面
-    DAEMON_MODE = False  # 守护进程模式
-    PID_FILE = "video_downloader.pid"
-    LOG_FILE = "video_downloader.log"
+    SERVER_MODE = False
+    DAEMON_MODE = False
+    PID_FILE = os.path.join(DATA_DIR, "video_downloader.pid")
+    LOG_FILE = os.path.join(LOGS_DIR, "video_downloader.log")
     LOG_LEVEL = "INFO"
     LOG_MAX_SIZE = 10 * 1024 * 1024  # 10MB
     LOG_BACKUP_COUNT = 5
-
-    # 请求头
-    DEFAULT_HEADERS = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
-        'Accept': 'application/json',
-        'Accept-Language': 'en-US,en;q=0.9',
-        'Accept-Encoding': 'gzip, deflate, br',
-        'Connection': 'keep-alive',
-        'Cache-Control': 'no-cache'
-    }
 
     # 安全配置
     ENABLE_SSL_VERIFY = False
@@ -96,7 +116,7 @@ class Config:
             },
             'file': {
                 'class': 'logging.FileHandler',
-                'filename': 'app.log',
+                'filename': LOG_FILE,
                 'formatter': 'verbose',
             },
         },

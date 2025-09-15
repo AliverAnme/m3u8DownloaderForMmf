@@ -12,7 +12,7 @@ from datetime import datetime, timedelta
 from typing import List, Optional, Dict, Any
 from contextlib import contextmanager
 
-from .models import VideoRecord, DownloadStatus
+from .models import VideoRecord
 
 
 class DatabaseManager:
@@ -33,23 +33,19 @@ class DatabaseManager:
                     # 启用外键约束
                     cursor.execute('PRAGMA foreign_keys = ON')
                     
-                    # 创建视频表
+                    # 创建视频表（按照新的字段设计）
                     cursor.execute('''
                         CREATE TABLE IF NOT EXISTS videos (
-                            id TEXT PRIMARY KEY,
                             title TEXT NOT NULL,
-                            url TEXT NOT NULL,
-                            description TEXT,
+                            video_date TEXT NOT NULL,
                             cover TEXT,
-                            file_path TEXT,
-                            file_size INTEGER,
-                            download_status TEXT DEFAULT 'pending' CHECK (download_status IN ('pending', 'downloading', 'completed', 'failed', 'uploaded')),
-                            download_time TEXT,
-                            upload_time TEXT,
-                            cloud_path TEXT,
+                            url TEXT,
+                            description TEXT,
+                            download BOOLEAN DEFAULT 0,
+                            is_primer BOOLEAN DEFAULT 0,
                             created_at TEXT NOT NULL,
                             updated_at TEXT NOT NULL,
-                            CONSTRAINT valid_file_size CHECK (file_size IS NULL OR file_size >= 0),
+                            PRIMARY KEY (title, video_date),
                             CONSTRAINT valid_dates CHECK (
                                 datetime(created_at) IS NOT NULL AND 
                                 datetime(updated_at) IS NOT NULL
@@ -61,32 +57,22 @@ class DatabaseManager:
                     cursor.execute('''
                         CREATE TABLE IF NOT EXISTS download_history (
                             id INTEGER PRIMARY KEY AUTOINCREMENT,
-                            video_id TEXT NOT NULL,
+                            title TEXT NOT NULL,
+                            video_date TEXT NOT NULL,
                             action TEXT NOT NULL,
                             status TEXT NOT NULL,
                             error_message TEXT,
                             timestamp TEXT NOT NULL,
-                            FOREIGN KEY (video_id) REFERENCES videos (id) ON DELETE CASCADE
+                            FOREIGN KEY (title, video_date) REFERENCES videos (title, video_date) ON DELETE CASCADE
                         )
                     ''')
                     
                     # 创建索引以提高查询性能
-                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_download_status ON videos(download_status)')
-                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_created_at ON videos(created_at)')
-                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_id_history ON download_history(video_id)')
-                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_timestamp_history ON download_history(timestamp)')
-                    
-                    # 创建视图以便于查询
-                    cursor.execute('''
-                        CREATE VIEW IF NOT EXISTS video_summary AS
-                        SELECT 
-                            download_status,
-                            COUNT(*) as count,
-                            COALESCE(SUM(file_size), 0) as total_size
-                        FROM videos 
-                        GROUP BY download_status
-                    ''')
-                    
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_download ON videos(download)')
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_date ON videos(video_date)')
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_title ON videos(title)')
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_is_primer ON videos(is_primer)')
+
                     conn.commit()
                     
             except sqlite3.Error as e:
@@ -99,11 +85,11 @@ class DatabaseManager:
         conn = None
         try:
             conn = sqlite3.connect(
-                self.db_path, 
-                timeout=30.0,  # 30秒超时
+                self.db_path,
+                timeout=30.0,
                 check_same_thread=False
             )
-            conn.row_factory = sqlite3.Row  # 使查询结果可以按列名访问
+            conn.row_factory = sqlite3.Row
             yield conn
         except sqlite3.Error as e:
             if conn:
@@ -113,461 +99,160 @@ class DatabaseManager:
             if conn:
                 conn.close()
     
-    def add_video(self, video: VideoRecord) -> bool:
-        """添加视频记录"""
+    def insert_or_update_video(self, video: VideoRecord) -> bool:
+        """插入或更新视频记录"""
         with self._lock:
             try:
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
-                    now = datetime.now().isoformat()
 
-                    cursor.execute('''
-                        INSERT OR REPLACE INTO videos 
-                        (id, title, url, description, cover, download_status, created_at, updated_at)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                    ''', (
-                        video.id, video.title, video.url, video.description,
-                        video.cover, video.download_status.value, now, now
-                    ))
+                    # 检查记录是否存在
+                    cursor.execute(
+                        'SELECT title FROM videos WHERE title = ? AND video_date = ?',
+                        (video.title, video.video_date)
+                    )
+
+                    if cursor.fetchone():
+                        # 更新现有记录
+                        cursor.execute('''
+                            UPDATE videos SET
+                                cover = ?,
+                                url = ?,
+                                description = ?,
+                                is_primer = ?,
+                                updated_at = ?
+                            WHERE title = ? AND video_date = ?
+                        ''', (
+                            video.cover,
+                            video.url,
+                            video.description,
+                            video.is_primer,
+                            datetime.now().isoformat(),
+                            video.title,
+                            video.video_date
+                        ))
+                    else:
+                        # 插入新记录
+                        cursor.execute('''
+                            INSERT INTO videos (
+                                title, video_date, cover, url, description,
+                                download, is_primer, created_at, updated_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (
+                            video.title,
+                            video.video_date,
+                            video.cover,
+                            video.url,
+                            video.description,
+                            video.download,
+                            video.is_primer,
+                            video.created_at.isoformat(),
+                            video.updated_at.isoformat()
+                        ))
 
                     conn.commit()
                     return True
                     
             except sqlite3.Error as e:
-                print(f"❌ 添加视频记录失败: {e}")
+                print(f"❌ 插入/更新视频记录失败: {e}")
                 return False
     
-    def get_video(self, video_id: str) -> Optional[VideoRecord]:
-        """获取指定视频记录"""
-        with self._lock:
-            try:
-                with self.get_connection() as conn:
-                    cursor = conn.cursor()
-                    cursor.execute('SELECT * FROM videos WHERE id = ?', (video_id,))
-                    row = cursor.fetchone()
-
-                    if row:
-                        return self._row_to_video_record(row)
-                    return None
-                    
-            except sqlite3.Error as e:
-                print(f"❌ 获取视频记录失败: {e}")
-                return None
-    
-    def get_all_videos(self, limit: int = None) -> List[VideoRecord]:
-        """获取所有视频记录"""
-        with self._lock:
-            try:
-                with self.get_connection() as conn:
-                    cursor = conn.cursor()
-                    
-                    if limit:
-                        cursor.execute('SELECT * FROM videos ORDER BY created_at DESC LIMIT ?', (limit,))
-                    else:
-                        cursor.execute('SELECT * FROM videos ORDER BY created_at DESC')
-
-                    rows = cursor.fetchall()
-                    return [self._row_to_video_record(row) for row in rows]
-
-            except sqlite3.Error as e:
-                print(f"❌ 获取视频列表失败: {e}")
-                return []
-    
-    def get_videos_by_status(self, status: DownloadStatus) -> List[VideoRecord]:
-        """根据状态获取视频记录"""
+    def get_videos_by_date(self, video_date: str) -> List[VideoRecord]:
+        """根据日期获取视频列表"""
         with self._lock:
             try:
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute(
-                        'SELECT * FROM videos WHERE download_status = ? ORDER BY created_at DESC',
-                        (status.value,)
+                        'SELECT * FROM videos WHERE video_date = ? ORDER BY title',
+                        (video_date,)
                     )
-                    rows = cursor.fetchall()
-                    return [self._row_to_video_record(row) for row in rows]
+
+                    return [self._row_to_video_record(row) for row in cursor.fetchall()]
 
             except sqlite3.Error as e:
-                print(f"❌ 根据状态获取视频失败: {e}")
+                print(f"❌ 获取视频列表失败: {e}")
                 return []
     
-    def get_videos_missing_files(self) -> List[VideoRecord]:
-        """获取文件缺失的视频（数据库中存在但本地文件不存在）"""
+    def get_videos_by_title(self, title: str) -> List[VideoRecord]:
+        """根据标题获取视频列表"""
         with self._lock:
             try:
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
-                    cursor.execute('''
-                        SELECT * FROM videos 
-                        WHERE download_status = 'completed' 
-                        AND (file_path IS NULL OR file_path = '')
-                        OR download_status = 'pending'
-                        ORDER BY created_at DESC
-                    ''')
+                    cursor.execute(
+                        'SELECT * FROM videos WHERE title LIKE ? ORDER BY video_date',
+                        (f'%{title}%',)
+                    )
 
-                    rows = cursor.fetchall()
-                    missing_videos = []
-
-                    for row in rows:
-                        video = self._row_to_video_record(row)
-                        # 检查文件是否真的不存在
-                        if not video.file_path or not os.path.exists(video.file_path):
-                            missing_videos.append(video)
-
-                    return missing_videos
+                    return [self._row_to_video_record(row) for row in cursor.fetchall()]
 
             except sqlite3.Error as e:
-                print(f"❌ 获取缺失文件的视频失败: {e}")
+                print(f"❌ 获取视频列表失败: {e}")
                 return []
-
-    def sync_database_with_local_files(self, download_dir: str) -> Dict[str, int]:
-        """同步数据库与本地文件状态"""
-        if not os.path.exists(download_dir):
-            return {
-                'updated_to_completed': 0,
-                'updated_to_missing': 0,
-                'created_from_files': 0,
-                'files_matched': 0
-            }
-
+    
+    def get_undownloaded_videos(self, video_date: str = None) -> List[VideoRecord]:
+        """获取未下载的视频列表"""
         with self._lock:
             try:
-                stats = {
-                    'updated_to_completed': 0,
-                    'updated_to_missing': 0,
-                    'created_from_files': 0,
-                    'files_matched': 0
-                }
+                with self.get_connection() as conn:
+                    cursor = conn.cursor()
 
-                # 获取所有视频记录
-                all_videos = self.get_all_videos()
-
-                # 获取下载目录中的所有视频文件
-                video_extensions = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']
-                local_files = []
-
-                for ext in video_extensions:
-                    pattern = os.path.join(download_dir, '**', ext)
-                    local_files.extend(glob.glob(pattern, recursive=True))
-
-                # 为数据库中的视频检查本地文件
-                for video in all_videos:
-                    found_file = None
-
-                    # 首先检查数据库中记录的文件路径
-                    if video.file_path and os.path.exists(video.file_path):
-                        found_file = video.file_path
+                    if video_date:
+                        cursor.execute(
+                            'SELECT * FROM videos WHERE download = 0 AND video_date = ? ORDER BY title',
+                            (video_date,)
+                        )
                     else:
-                        # 通过标题和ID匹配文件
-                        found_file = self._find_matching_file(video, local_files)
-
-                    if found_file:
-                        # 文件存在，更新为已完成状态
-                        if video.download_status != DownloadStatus.COMPLETED:
-                            file_size = os.path.getsize(found_file)
-                            self.update_video_status(
-                                video.id,
-                                DownloadStatus.COMPLETED,
-                                found_file,
-                                file_size
-                            )
-                            stats['updated_to_completed'] += 1
-                        stats['files_matched'] += 1
-                    else:
-                        # 文件不存在，重置为待下载状态
-                        if video.download_status == DownloadStatus.COMPLETED:
-                            self.update_video_status(video.id, DownloadStatus.PENDING)
-                            stats['updated_to_missing'] += 1
-
-                # 为本地文件创建数据库记录（如果不存在）
-                existing_files = {v.file_path for v in all_videos if v.file_path}
-                for file_path in local_files:
-                    if file_path not in existing_files:
-                        # 从文件名提取信息
-                        filename = os.path.basename(file_path)
-                        title = os.path.splitext(filename)[0]
-
-                        # 创建新的视频记录
-                        video_id = self._generate_id_from_filename(filename)
-                        new_video = VideoRecord(
-                            id=video_id,
-                            title=title,
-                            url='',  # 本地文件没有URL
-                            description='从本地文件同步',
-                            cover='',
-                            download_status=DownloadStatus.COMPLETED
+                        cursor.execute(
+                            'SELECT * FROM videos WHERE download = 0 ORDER BY video_date, title'
                         )
 
-                        if self.add_video(new_video):
-                            file_size = os.path.getsize(file_path)
-                            self.update_video_status(
-                                video_id,
-                                DownloadStatus.COMPLETED,
-                                file_path,
-                                file_size
-                            )
-                            stats['created_from_files'] += 1
-
-                return stats
-
-            except Exception as e:
-                print(f"❌ 同步数据库与本地文件失败: {e}")
-                return {
-                    'updated_to_completed': 0,
-                    'updated_to_missing': 0,
-                    'created_from_files': 0,
-                    'files_matched': 0
-                }
-
-    def _find_matching_file(self, video: VideoRecord, local_files: List[str]) -> Optional[str]:
-        """为视频记录查找匹配的本地文件"""
-        if not video.title:
-            return None
-
-        # 清理标题用于匹配
-        clean_title = re.sub(r'[<>:"/\\|?*]', '', video.title)
-        clean_title = clean_title.strip()
-
-        for file_path in local_files:
-            filename = os.path.basename(file_path)
-            filename_without_ext = os.path.splitext(filename)[0]
-
-            # 多种匹配策略
-            if self._is_title_match(clean_title, filename_without_ext):
-                return file_path
-
-            # 通过视频ID匹配
-            if video.id and video.id in filename_without_ext:
-                return file_path
-
-        return None
-
-    def _is_title_match(self, title: str, filename: str) -> bool:
-        """判断标题是否与文件名匹配"""
-        if not title or not filename:
-            return False
-
-        # 移除特殊字符进行比较
-        title_clean = re.sub(r'[^\w\s]', '', title.lower())
-        filename_clean = re.sub(r'[^\w\s]', '', filename.lower())
-
-        # 提取关键词进行匹配
-        title_words = set(title_clean.split())
-        filename_words = set(filename_clean.split())
-
-        # 如果标题词汇有50%以上出现在文件名中，认为匹配
-        if len(title_words) > 0:
-            match_ratio = len(title_words & filename_words) / len(title_words)
-            return match_ratio >= 0.5
-
-        # 子串匹配
-        if len(title_clean) > 10:
-            return title_clean[:20] in filename_clean or filename_clean[:20] in title_clean
-
-        return False
-
-    def _generate_id_from_filename(self, filename: str) -> str:
-        """从文件名生成视频ID"""
-        import hashlib
-        # 使用文件名的MD5哈希作为ID
-        name_without_ext = os.path.splitext(filename)[0]
-        return hashlib.md5(name_without_ext.encode('utf-8')).hexdigest()[:16]
-
-    def get_videos_missing_files(self) -> List[VideoRecord]:
-        """获取缺失文件的视频记录（改进版）"""
-        with self._lock:
-            try:
-                with self.get_connection() as conn:
-                    cursor = conn.cursor()
-
-                    # 获取所有视频记录
-                    cursor.execute('''
-                        SELECT * FROM videos 
-                        ORDER BY created_at DESC
-                    ''')
-
-                    rows = cursor.fetchall()
-                    missing_videos = []
-
-                    for row in rows:
-                        video = self._row_to_video_record(row)
-
-                        # 检查文件是否存在
-                        file_exists = False
-                        if video.file_path and os.path.exists(video.file_path):
-                            file_exists = True
-
-                        # 如果数据库记录显示已完成但文件不存在，或者状态为待下载
-                        if ((video.download_status == DownloadStatus.COMPLETED and not file_exists) or
-                            video.download_status == DownloadStatus.PENDING):
-                            missing_videos.append(video)
-
-                    return missing_videos
+                    return [self._row_to_video_record(row) for row in cursor.fetchall()]
 
             except sqlite3.Error as e:
-                print(f"❌ 获取缺失文件的视频失败: {e}")
+                print(f"❌ 获取未下载视频列表失败: {e}")
                 return []
 
-    def check_local_files_status(self, download_dir: str) -> Dict[str, Any]:
-        """检查本地文件状态并提供详细报告"""
-        if not os.path.exists(download_dir):
-            return {
-                'error': f'下载目录不存在: {download_dir}',
-                'files_in_db': 0,
-                'files_on_disk': 0,
-                'matched_files': 0,
-                'orphaned_files': 0,
-                'missing_files': 0
-            }
-
-        with self._lock:
-            try:
-                # 获取所有视频记录
-                all_videos = self.get_all_videos()
-
-                # 获取下载目录中的所有视频文件
-                video_extensions = ['*.mp4', '*.mkv', '*.avi', '*.mov', '*.wmv', '*.flv']
-                local_files = []
-
-                for ext in video_extensions:
-                    pattern = os.path.join(download_dir, '**', ext)
-                    local_files.extend(glob.glob(pattern, recursive=True))
-
-                # 统计信息
-                stats = {
-                    'files_in_db': len(all_videos),
-                    'files_on_disk': len(local_files),
-                    'matched_files': 0,
-                    'orphaned_files': 0,
-                    'missing_files': 0,
-                    'details': {
-                        'matched': [],
-                        'orphaned': [],
-                        'missing': []
-                    }
-                }
-
-                # 检查数据库中的每个视频
-                matched_files = set()
-                for video in all_videos:
-                    found_file = None
-
-                    # 检查记录的文件路径
-                    if video.file_path and os.path.exists(video.file_path):
-                        found_file = video.file_path
-                    else:
-                        # 尝试匹配本地文件
-                        found_file = self._find_matching_file(video, local_files)
-
-                    if found_file:
-                        stats['matched_files'] += 1
-                        matched_files.add(found_file)
-                        stats['details']['matched'].append({
-                            'video_id': video.id,
-                            'title': video.title,
-                            'file_path': found_file,
-                            'status': video.download_status.value
-                        })
-                    else:
-                        stats['missing_files'] += 1
-                        stats['details']['missing'].append({
-                            'video_id': video.id,
-                            'title': video.title,
-                            'recorded_path': video.file_path,
-                            'status': video.download_status.value
-                        })
-
-                # 检查孤立文件（在磁盘上但不在数据库中）
-                for file_path in local_files:
-                    if file_path not in matched_files:
-                        stats['orphaned_files'] += 1
-                        stats['details']['orphaned'].append({
-                            'file_path': file_path,
-                            'size_mb': os.path.getsize(file_path) / (1024 * 1024)
-                        })
-
-                return stats
-
-            except Exception as e:
-                return {
-                    'error': f'检查文件状态失败: {e}',
-                    'files_in_db': 0,
-                    'files_on_disk': 0,
-                    'matched_files': 0,
-                    'orphaned_files': 0,
-                    'missing_files': 0
-                }
-
-    def update_video_status(self, video_id: str, status: DownloadStatus,
-                           file_path: str = None, file_size: int = None) -> bool:
-        """更新视频状态"""
+    def update_download_status(self, title: str, video_date: str, download: bool) -> bool:
+        """更新下载状态"""
         with self._lock:
             try:
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
-                    now = datetime.now().isoformat()
-
-                    if status == DownloadStatus.COMPLETED and file_path:
-                        cursor.execute('''
-                            UPDATE videos 
-                            SET download_status = ?, file_path = ?, file_size = ?, 
-                                download_time = ?, updated_at = ?
-                            WHERE id = ?
-                        ''', (status.value, file_path, file_size, now, now, video_id))
-                    else:
-                        cursor.execute('''
-                            UPDATE videos 
-                            SET download_status = ?, updated_at = ?
-                            WHERE id = ?
-                        ''', (status.value, now, video_id))
+                    cursor.execute('''
+                        UPDATE videos SET
+                            download = ?,
+                            updated_at = ?
+                        WHERE title = ? AND video_date = ?
+                    ''', (
+                        download,
+                        datetime.now().isoformat(),
+                        title,
+                        video_date
+                    ))
 
                     conn.commit()
                     return cursor.rowcount > 0
 
             except sqlite3.Error as e:
-                print(f"❌ 更新视频状态失败: {e}")
+                print(f"❌ 更新下载状态失败: {e}")
                 return False
 
-    def update_upload_info(self, video_id: str, cloud_path: str) -> bool:
-        """更新上传信息"""
+    def get_all_videos(self) -> List[VideoRecord]:
+        """获取所有视频记录"""
         with self._lock:
             try:
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
-                    now = datetime.now().isoformat()
+                    cursor.execute('SELECT * FROM videos ORDER BY video_date DESC, title')
 
-                    cursor.execute('''
-                        UPDATE videos 
-                        SET download_status = ?, cloud_path = ?, upload_time = ?, updated_at = ?
-                        WHERE id = ?
-                    ''', (DownloadStatus.UPLOADED.value, cloud_path, now, now, video_id))
-
-                    conn.commit()
-                    return cursor.rowcount > 0
+                    return [self._row_to_video_record(row) for row in cursor.fetchall()]
 
             except sqlite3.Error as e:
-                print(f"❌ 更新上传信息失败: {e}")
-                return False
+                print(f"❌ 获取所有视频记录失败: {e}")
+                return []
 
-    def cleanup_failed_downloads(self, days_ago: int = 7) -> int:
-        """清理失败的下载记录"""
-        with self._lock:
-            try:
-                with self.get_connection() as conn:
-                    cursor = conn.cursor()
-                    cutoff_date = (datetime.now() - timedelta(days=days_ago)).isoformat()
-
-                    cursor.execute('''
-                        DELETE FROM videos 
-                        WHERE download_status = 'failed' AND updated_at < ?
-                    ''', (cutoff_date,))
-
-                    conn.commit()
-                    return cursor.rowcount
-
-            except sqlite3.Error as e:
-                print(f"❌ 清理失败记录失败: {e}")
-                return 0
-    
     def get_statistics(self) -> Dict[str, Any]:
         """获取统计信息"""
         with self._lock:
@@ -575,73 +260,83 @@ class DatabaseManager:
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
 
-                    # 获取各状态的统计
-                    cursor.execute('SELECT download_status, COUNT(*), COALESCE(SUM(file_size), 0) FROM videos GROUP BY download_status')
-                    status_stats = cursor.fetchall()
-
                     # 获取总数
-                    cursor.execute('SELECT COUNT(*), COALESCE(SUM(file_size), 0) FROM videos')
-                    total_count, total_size = cursor.fetchone()
+                    cursor.execute('SELECT COUNT(*) FROM videos')
+                    total = cursor.fetchone()[0]
 
-                    stats = {
-                        'total': total_count or 0,
-                        'total_size': total_size or 0,
-                        'pending': 0,
-                        'downloading': 0,
-                        'completed': 0,
-                        'failed': 0,
-                        'uploaded': 0
+                    # 获取已下载数
+                    cursor.execute('SELECT COUNT(*) FROM videos WHERE download = 1')
+                    downloaded = cursor.fetchone()[0]
+
+                    # 获取未下载数
+                    cursor.execute('SELECT COUNT(*) FROM videos WHERE download = 0')
+                    pending = cursor.fetchone()[0]
+
+                    # 获取付费视频数
+                    cursor.execute('SELECT COUNT(*) FROM videos WHERE is_primer = 1')
+                    primer = cursor.fetchone()[0]
+
+                    return {
+                        'total': total,
+                        'downloaded': downloaded,
+                        'pending': pending,
+                        'primer': primer
                     }
-
-                    for status, count, size in status_stats:
-                        if status in stats:
-                            stats[status] = count
-                            stats[f'{status}_size'] = size
-
-                    return stats
 
             except sqlite3.Error as e:
                 print(f"❌ 获取统计信息失败: {e}")
                 return {}
 
-    def _row_to_video_record(self, row: sqlite3.Row) -> VideoRecord:
-        """将数据库行转换为VideoRecord对象"""
-        return VideoRecord(
-            id=row['id'],
-            title=row['title'],
-            url=row['url'],
-            description=row['description'],
-            cover=row['cover'],
-            file_path=row['file_path'],
-            file_size=row['file_size'],
-            download_status=DownloadStatus(row['download_status']),
-            download_time=row['download_time'],
-            upload_time=row['upload_time'],
-            cloud_path=row['cloud_path'],
-            created_at=row['created_at'],
-            updated_at=row['updated_at']
-        )
+    def sync_with_local_directory(self, download_dir: str) -> int:
+        """同步本地目录与数据库状态"""
+        if not os.path.exists(download_dir):
+            print(f"⚠️ 下载目录不存在: {download_dir}")
+            return 0
 
-    def add_download_history(self, video_id: str, action: str, status: str, error_message: str = None):
-        """添加下载历史记录"""
+        updated_count = 0
+
         with self._lock:
             try:
-                with self.get_connection() as conn:
-                    cursor = conn.cursor()
-                    now = datetime.now().isoformat()
+                # 获取所有视频记录
+                videos = self.get_all_videos()
 
-                    cursor.execute('''
-                        INSERT INTO download_history 
-                        (video_id, action, status, error_message, timestamp)
-                        VALUES (?, ?, ?, ?, ?)
-                    ''', (video_id, action, status, error_message, now))
+                for video in videos:
+                    # 构造可能的文件名模式
+                    file_patterns = [
+                        f"{video.title}*.mp4",
+                        f"*{video.video_date}*.mp4",
+                        f"{video.get_unique_key()}*.mp4"
+                    ]
 
-                    conn.commit()
+                    found = False
+                    for pattern in file_patterns:
+                        files = glob.glob(os.path.join(download_dir, pattern))
+                        if files:
+                            found = True
+                            break
 
-            except sqlite3.Error as e:
-                print(f"❌ 添加下载历史失败: {e}")
+                    # 更新下载状态
+                    if found != video.download:
+                        if self.update_download_status(video.title, video.video_date, found):
+                            updated_count += 1
 
-    def close(self):
-        """关闭数据库连接"""
-        # 由于使用了上下文管理器，这里不需要特别的清理操作
-        pass
+                print(f"✅ 同步完成，更新了 {updated_count} 条记录")
+                return updated_count
+
+            except Exception as e:
+                print(f"❌ 同步目录失败: {e}")
+                return 0
+
+    def _row_to_video_record(self, row) -> VideoRecord:
+        """将数据库行转换为VideoRecord对象"""
+        return VideoRecord(
+            title=row['title'],
+            video_date=row['video_date'],
+            cover=row['cover'],
+            url=row['url'],
+            description=row['description'],
+            download=bool(row['download']),
+            is_primer=bool(row['is_primer']),
+            created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
+            updated_at=datetime.fromisoformat(row['updated_at']) if row['updated_at'] else None
+        )

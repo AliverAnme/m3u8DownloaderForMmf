@@ -10,6 +10,7 @@ import re
 from typing import Dict, Any, List
 
 from ..core.config import Config
+from ..database.models import VideoRecord
 
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -20,9 +21,9 @@ class APIClient:
     def __init__(self):
         self.config = Config()
 
-    def fetch_posts_from_api(self, size: int = 50, verify_ssl: bool = False) -> Dict[str, Any]:
+    def fetch_api_data(self, size: int = 50, verify_ssl: bool = False) -> Dict[str, Any]:
         """
-        从API接口获取posts数据并保存到本地
+        从API接口获取数据
 
         Args:
             size (int): 每页返回的数据条数，默认为50
@@ -45,53 +46,100 @@ class APIClient:
         headers = self.config.DEFAULT_HEADERS
 
         try:
-            print(f"正在请求API: {base_url}")
-            print(f"参数: {params}")
-            print(f"SSL验证: {'启用' if verify_ssl else '禁用'}")
+            print(f"🔄 正在请求API: {base_url}")
+            print(f"📊 参数: {params}")
+            print(f"🔒 SSL验证: {'启用' if verify_ssl else '禁用'}")
 
-            # 发送GET请求，禁用SSL验证并设置超时
+            # 发送请求
             response = requests.get(
                 base_url,
                 params=params,
                 headers=headers,
                 verify=verify_ssl,
-                timeout=self.config.API_TIMEOUT
+                timeout=30
             )
+
+            # 检查响应状态
             response.raise_for_status()
 
-            # 解析JSON数据
-            data = response.json()
+            # 解析JSON响应
+            api_data = response.json()
 
-            # 保存到本地文件
-            output_file = self.config.API_RESPONSE_FILE
-            with open(output_file, 'w', encoding='utf-8') as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
+            print(f"✅ API请求成功，状态码: {response.status_code}")
 
-            print(f"数据已成功保存到 {output_file}")
-            print(f"获取到 {len(data.get('items', []))} 条记录")
+            return api_data
 
-            return data
-
-        except requests.exceptions.SSLError as e:
-            print(f"SSL错误: {e}")
-            print("尝试禁用SSL验证重新请求...")
-            if verify_ssl:
-                return self.fetch_posts_from_api(size, verify_ssl=False)
-            else:
-                print("SSL验证已禁用，但仍然出现SSL错误")
-                return {}
         except requests.exceptions.RequestException as e:
-            print(f"API请求失败: {e}")
-            print(f"错误类型: {type(e).__name__}")
+            print(f"❌ API请求失败: {e}")
             return {}
         except json.JSONDecodeError as e:
-            print(f"JSON解析失败: {e}")
-            print("响应内容可能不是有效的JSON格式")
+            print(f"❌ JSON解析失败: {e}")
             return {}
-        except Exception as e:
-            print(f"发生未知错误: {e}")
-            print(f"错误类型: {type(e).__name__}")
-            return {}
+
+    def parse_items_to_video_records(self, api_data: Dict[str, Any]) -> List[VideoRecord]:
+        """
+        从API数据中解析items数组，转换为VideoRecord列表
+
+        Args:
+            api_data (Dict[str, Any]): API返回的数据
+
+        Returns:
+            List[VideoRecord]: 解析后的视频记录列表
+        """
+        video_records = []
+
+        # 获取items数组
+        items = api_data.get('items', [])
+        if not items:
+            print("⚠️ API数据中未找到items数组")
+            return video_records
+
+        print(f"📋 找到 {len(items)} 条数据项")
+
+        for i, item in enumerate(items):
+            try:
+                # 从API数据创建VideoRecord
+                video_record = VideoRecord.from_api_data(item)
+
+                # 验证必要字段
+                if not video_record.title or not video_record.video_date:
+                    print(f"⚠️ 跳过第 {i+1} 条数据：缺少必要字段")
+                    continue
+
+                video_records.append(video_record)
+                print(f"✅ 解析第 {i+1} 条：{video_record.title} ({video_record.video_date})")
+
+            except Exception as e:
+                print(f"❌ 解析第 {i+1} 条数据失败: {e}")
+                continue
+
+        print(f"🎯 成功解析 {len(video_records)} 条有效记录")
+        return video_records
+
+    def fetch_and_parse_videos(self, size: int = 50) -> List[VideoRecord]:
+        """
+        一次性完成API请求和数据解析
+
+        Args:
+            size (int): 每页返回的数据条数
+
+        Returns:
+            List[VideoRecord]: 解析后的视频记录列表
+        """
+        print("🚀 开始执行API解析...")
+        print(f"📊 请求数据条数: {size}")
+
+        # 1. 获取API数据
+        api_data = self.fetch_api_data(size)
+        if not api_data:
+            print("❌ 无法获取API数据")
+            return []
+
+        # 2. 解析为VideoRecord列表
+        video_records = self.parse_items_to_video_records(api_data)
+
+        print(f"📊 API解析完成，共处理 {len(video_records)} 条数据")
+        return video_records
 
     def extract_title_from_description(self, description: str) -> str:
         """
