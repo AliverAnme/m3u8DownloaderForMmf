@@ -58,11 +58,29 @@ class UserInterface:
         print("1. 基础API解析（单次请求）")
         print("2. 带重试机制的API解析")
         print("3. 多页API解析（支持重试）")
-        print("4. 返回主菜单")
+        print("4. 增强JSON解析（支持字符串对象）")
+        print("5. 返回主菜单")
         print("-"*60)
 
         while True:
-            choice = input("请输入操作编号（1-4）: ").strip()
+            choice = input("请输入操作编号（1-5）: ").strip()
+            if choice in ['1', '2', '3', '4', '5']:
+                return choice
+            print("❌ 无效输入，请输入1-5之间的数字")
+
+    def show_enhanced_parsing_menu(self) -> str:
+        """显示增强解析菜单并获取用户输入"""
+        print("\n" + "="*50)
+        print("🔍 【增强JSON解析选项】")
+        print("="*50)
+        print("1. 从API获取数据并使用增强解析")
+        print("2. 从本地JSON文件解析")
+        print("3. 测试字符串对象解析功能")
+        print("4. 返回上级菜单")
+        print("-"*50)
+
+        while True:
+            choice = input("请选择数据源（1-4）: ").strip()
             if choice in ['1', '2', '3', '4']:
                 return choice
             print("❌ 无效输入，请输入1-4之间的数字")
@@ -338,3 +356,28 @@ class UserInterface:
                     print("❌ 页面间延迟时间必须在0.1-5.0秒之间")
             except ValueError:
                 print("❌ 请输入有效的数字")
+
+    def get_json_file_path_input(self) -> str:
+        """获取JSON文件路径输入"""
+        print("\n💡 提示：可以输入绝对路径或相对路径")
+        print("   示例：video_downloader/data/api_response.json")
+
+        while True:
+            file_path = input("请输入JSON文件路径: ").strip()
+            if not file_path:
+                print("❌ 文件路径不能为空")
+                continue
+
+            # 处理相对路径
+            if not os.path.isabs(file_path):
+                # 相对于项目根目录
+                current_dir = os.getcwd()
+                file_path = os.path.join(current_dir, file_path)
+
+            if os.path.exists(file_path):
+                return file_path
+            else:
+                print(f"❌ 文件不存在: {file_path}")
+                retry = input("是否重新输入？(y/n): ").strip().lower()
+                if retry not in ['y', 'yes', '是']:
+                    return ""

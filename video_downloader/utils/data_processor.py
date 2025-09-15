@@ -3,6 +3,7 @@ import re
 from typing import Dict, Any, List
 
 from ..core.config import Config
+from ..utils.enhanced_json_parser import EnhancedJSONParser
 
 
 class DataProcessor:
@@ -10,6 +11,7 @@ class DataProcessor:
 
     def __init__(self):
         self.config = Config()
+        self.enhanced_parser = EnhancedJSONParser()
 
     def read_json_file(self, file_path: str) -> Dict[str, Any]:
         """
@@ -23,16 +25,57 @@ class DataProcessor:
         """
         try:
             with open(file_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-            return data
+                content = f.read()
+
+            # 尝试标准JSON解析
+            try:
+                data = json.loads(content)
+                return data
+            except json.JSONDecodeError:
+                # 如果标准解析失败，使用增强解析器
+                print("🔄 标准JSON解析失败，尝试增强解析...")
+                return self.enhanced_parser.parse_api_response(content)
+
         except FileNotFoundError:
             print(f"文件 {file_path} 不存在")
             return {}
-        except json.JSONDecodeError as e:
-            print(f"JSON解析失败: {e}")
-            return {}
         except Exception as e:
             print(f"读取文件时发生错误: {e}")
+            return {}
+
+    def read_json_file_enhanced(self, file_path: str) -> Dict[str, Any]:
+        """
+        使用增强解析器读取JSON文件，支持复杂格式
+
+        Args:
+            file_path (str): JSON文件路径
+
+        Returns:
+            Dict[str, Any]: 解析后的数据
+        """
+        try:
+            with open(file_path, 'r', encoding='utf-8') as f:
+                content = f.read()
+
+            print(f"📖 使用增强解析器读取文件: {file_path}")
+            parsed_data = self.enhanced_parser.parse_api_response(content)
+
+            # 输出解析统计
+            stats = self.enhanced_parser.get_parse_stats()
+            if stats['total_items'] > 0:
+                print(f"📊 文件解析统计:")
+                print(f"   总项目数: {stats['total_items']}")
+                print(f"   字符串对象解析: {stats['string_object_parses']}")
+                print(f"   JSON字符串解析: {stats['json_string_parses']}")
+                print(f"   降级解析: {stats['fallback_parses']}")
+
+            return parsed_data
+
+        except FileNotFoundError:
+            print(f"❌ 文件不存在: {file_path}")
+            return {}
+        except Exception as e:
+            print(f"❌ 增强解析文件时发生错误: {e}")
             return {}
 
     def clean_title(self, title: str) -> str:

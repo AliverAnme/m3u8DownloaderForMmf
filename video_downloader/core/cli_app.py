@@ -91,6 +91,137 @@ class CLIVideoDownloaderApp:
         except Exception as e:
             self.ui.show_error(f"获取启动信息失败: {e}")
 
+    def handle_enhanced_json_parsing(self):
+        """处理增强JSON解析操作"""
+        try:
+            self.ui.show_info("🔍 启动增强JSON解析功能...")
+
+            # 选择数据源
+            source_choice = self.ui.show_enhanced_parsing_menu()
+
+            if source_choice == '1':
+                # 从API获取数据并使用增强解析
+                size = self.ui.get_api_size_input(self.config.DEFAULT_PAGE_SIZE)
+                self.ui.show_info(f"📡 获取API数据 ({size} 条) 并使用增强解析...")
+
+                # 获取API数据
+                api_data = self.api_client.fetch_api_data(size)
+                if not api_data:
+                    self.ui.show_warning("❌ 无法获取API数据")
+                    return
+
+                # 使用增强解析器处理
+                video_records = self.api_client.parse_api_response_enhanced(api_data)
+
+            elif source_choice == '2':
+                # 从本地JSON文件解析
+                file_path = self.ui.get_json_file_path_input()
+                if not file_path or not os.path.exists(file_path):
+                    self.ui.show_warning("❌ 文件不存在或路径无效")
+                    return
+
+                self.ui.show_info(f"📖 使用增强解析器读取文件: {file_path}")
+
+                # 使用数据处理器的增强解析功能
+                from ..utils.data_processor import DataProcessor
+                processor = DataProcessor()
+                json_data = processor.read_json_file_enhanced(file_path)
+
+                if not json_data or 'items' not in json_data:
+                    self.ui.show_warning("❌ 文件中没有找到有效的items数据")
+                    return
+
+                # 转换为VideoRecord
+                video_records = []
+                items = json_data['items']
+                for i, item in enumerate(items):
+                    try:
+                        if isinstance(item, dict) and any(key in item for key in ['description', 'title', 'content']):
+                            description = item.get('description', '') or item.get('content', '') or item.get('title', '')
+                            if description:
+                                standardized_data = {
+                                    'description': str(description),
+                                    'cover': item.get('cover', ''),
+                                    'url': item.get('url', ''),
+                                    'id': item.get('id', ''),
+                                    'title': item.get('title', '')
+                                }
+                                video_record = VideoRecord.from_api_data(standardized_data)
+                                if video_record and video_record.title:
+                                    video_records.append(video_record)
+                    except Exception as e:
+                        print(f"⚠️ 跳过第 {i+1} 项: {e}")
+
+            elif source_choice == '3':
+                # 测试字符串对象解析
+                self._test_string_object_parsing()
+                return
+            else:
+                return
+
+            if not video_records:
+                self.ui.show_warning("❌ 增强解析未获取到任何有效视频数据")
+                return
+
+            # 处理解析结果
+            self.ui.show_success(f"✅ 增强解析成功，获得 {len(video_records)} 条视频记录")
+            self._process_video_records(video_records)
+
+        except Exception as e:
+            self.ui.show_error(f"❌ 增强JSON解析失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _test_string_object_parsing(self):
+        """测试字符串对象解析功能"""
+        self.ui.show_info("🧪 测试字符串对象解析功能...")
+
+        # 创建测试数据
+        test_data = {
+            "items": [
+                # 正常的字典格式
+                {
+                    "id": "test001",
+                    "title": "正常的视频标题",
+                    "description": "【测试视频】这是一个正常的视频描述 #测试 #视频",
+                    "url": "https://example.com/video1.m3u8",
+                    "cover": "https://example.com/cover1.jpg"
+                },
+                # 字符串格式的JSON
+                '{"id": "test002", "description": "【JSON字符串】这是JSON字符串格式的数据 #测试", "url": "https://example.com/video2.m3u8"}',
+                # 对象表示字符串
+                '<Video object at 0x7f8b8c0d4f40>',
+                # 对象参数格式
+                'Video(id="test003", description="【对象格式】对象表示的视频数据 #测试", url="https://example.com/video3.m3u8")',
+                # 纯文本描述
+                "这是一段纯文本描述，包含了一些视频信息，但不是标准格式",
+                # 无效数据
+                None,
+                "",
+                "null",
+                # 混合格式
+                ["nested_data", {"description": "嵌套在列表中的数据"}]
+            ]
+        }
+
+        try:
+            # 使用增强解析器处理测试数据
+            video_records = self.api_client.parse_api_response_enhanced(test_data)
+
+            self.ui.show_success(f"✅ 测试完成！成功解析 {len(video_records)} 条记录")
+
+            # 显示解析结果
+            if video_records:
+                print("\n📋 解析结果预览:")
+                for i, record in enumerate(video_records[:3], 1):
+                    print(f"{i}. {record.title}")
+                    print(f"   描述: {record.description[:50]}...")
+                    print(f"   URL: {record.video_url}")
+                    print()
+
+        except Exception as e:
+            self.ui.show_error(f"❌ 测试失败: {e}")
+
     def handle_api_parsing(self):
         """处理API解析操作"""
         while True:
@@ -103,9 +234,11 @@ class CLIVideoDownloaderApp:
             elif choice == '3':
                 self.handle_multi_page_api_parsing()
             elif choice == '4':
+                self.handle_enhanced_json_parsing()  # 新增选项
+            elif choice == '5':
                 break
 
-            if choice != '4':
+            if choice != '5':
                 self.ui.wait_for_enter()
 
     def handle_basic_api_parsing(self):
@@ -138,16 +271,21 @@ class CLIVideoDownloaderApp:
             max_retries = self.ui.get_retry_count_input()
             retry_delay = self.ui.get_retry_delay_input()
 
+            # 询问是否使用增强解析
+            use_enhanced = self.ui.confirm_action("是否使用增强JSON解析？(推荐，支持更多数据格式)")
+
             self.ui.show_info(f"开始执行带重试的API解析...")
             self.ui.show_info(f"请求数据条数: {size}")
             self.ui.show_info(f"最大重试次数: {max_retries}")
             self.ui.show_info(f"重试延迟: {retry_delay} 秒")
+            self.ui.show_info(f"增强解析: {'启用' if use_enhanced else '禁用'}")
 
-            # 使用重试机制获取API数据并解析
-            video_records = self.api_client.fetch_and_parse_videos_with_retry(
+            # 使用增强版本的重试机制
+            video_records = self.api_client.fetch_and_parse_videos_with_retry_enhanced(
                 size=size,
                 max_retries=max_retries,
-                retry_delay=retry_delay
+                retry_delay=retry_delay,
+                use_enhanced_parsing=use_enhanced
             )
 
             if not video_records:
@@ -170,6 +308,9 @@ class CLIVideoDownloaderApp:
             max_retries = self.ui.get_retry_count_input()
             page_delay = self.ui.get_page_delay_input()
 
+            # 询问是否使用增强解析
+            use_enhanced = self.ui.confirm_action("是否使用增强JSON解析？(推荐，支持更多数据格式)")
+
             # 解析页码
             pages = self._parse_pages_input(pages_input)
             if not pages:
@@ -181,13 +322,15 @@ class CLIVideoDownloaderApp:
             self.ui.show_info(f"每页数据条数: {size}")
             self.ui.show_info(f"每页重试次数: {max_retries}")
             self.ui.show_info(f"页面间延迟: {page_delay} 秒")
+            self.ui.show_info(f"增强解析: {'启用' if use_enhanced else '禁用'}")
 
-            # 使用多页重试机制获取API数据
-            video_records = self.api_client.fetch_multiple_pages_with_retry(
+            # 使用增强版本的多页重试机制
+            video_records = self.api_client.fetch_multiple_pages_with_retry_enhanced(
                 pages=pages,
                 size=size,
                 max_retries=max_retries,
-                page_delay=page_delay
+                page_delay=page_delay,
+                use_enhanced_parsing=use_enhanced
             )
 
             if not video_records:

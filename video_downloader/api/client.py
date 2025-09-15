@@ -13,6 +13,7 @@ from datetime import datetime
 
 from ..core.config import Config
 from ..database.models import VideoRecord
+from ..utils.enhanced_json_parser import EnhancedJSONParser
 
 # 禁用SSL警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -139,6 +140,8 @@ class APIClient:
             List[VideoRecord]: 解析后的视频记录列表
         """
         video_records = []
+        skipped_count = 0
+        failed_count = 0
 
         # 验证API数据结构
         if not isinstance(api_data, dict):
@@ -165,6 +168,11 @@ class APIClient:
 
         for i, item in enumerate(items):
             try:
+                # 预检查：快速跳过明显无效的数据
+                if self._should_skip_item(item):
+                    skipped_count += 1
+                    continue
+
                 # 多种解析方式处理不同数据格式
                 video_record = self._parse_single_item(item, i + 1)
 
@@ -172,16 +180,78 @@ class APIClient:
                     video_records.append(video_record)
                     print(f"✅ 解析第 {i+1} 条：{video_record.title} ({video_record.video_date})")
                 else:
-                    print(f"⚠️ 跳过第 {i+1} 条数据：解析失败")
+                    skipped_count += 1
 
             except Exception as e:
+                failed_count += 1
                 print(f"❌ 解析第 {i+1} 条数据失败 (未知错误): {e}")
                 print(f"   数据类型: {type(item).__name__}")
                 print(f"   数据内容: {str(item)[:200]}...")
                 continue
 
-        print(f"🎯 成功解析 {len(video_records)} 条有效记录")
+        # 汇总信息
+        print(f"🎯 解析完成 - 成功: {len(video_records)}, 跳过: {skipped_count}, 失败: {failed_count}")
+        if skipped_count > 0:
+            print(f"💡 跳过的数据可能包含：对象表示、空值或格式不兼容的内容")
+
         return video_records
+
+    def _should_skip_item(self, item) -> bool:
+        """预检查是否应该跳过某个数据项"""
+        try:
+            # 空值检查
+            if item is None:
+                return True
+
+            # 字符串类型的快速检查
+            if isinstance(item, str):
+                item = item.strip()
+                if not item or len(item) < 5:
+                    return True
+                # 检查是否是对象表示
+                if ('<' in item and 'object at 0x' in item and '>' in item) or \
+                   (item.startswith('<') and item.endswith('>') and 'object' in item) or \
+                   item in ['None', 'null', '{}', '[]', '""', "''"] or \
+                   item.lower() in ['undefined', 'nan']:
+                    return True
+
+            # 字典类型的检查 - 根据实际API数据结构调整
+            elif isinstance(item, dict):
+                # 如果字典为空，直接跳过
+                if not item:
+                    return True
+
+                # 检查是否有基本的视频信息字段（更宽松的检查）
+                has_video_fields = any(key in item for key in [
+                    'description', 'title', 'content', 'desc', 'url', 'cover', 'id'
+                ])
+
+                # 如果没有任何视频相关字段，跳过
+                if not has_video_fields:
+                    return True
+
+                # 检查description字段是否有效
+                description = item.get('description', '')
+                if description and isinstance(description, str) and len(description.strip()) > 0:
+                    return False  # 有有效的description，不跳过
+
+                # 如果没有description，检查是否有其他可用字段
+                title = item.get('title', '')
+                if title and isinstance(title, str) and len(title.strip()) > 0:
+                    return False  # 有有效的title，不跳过
+
+                # 如果既没有description也没有title，但有其他字段，也不跳过（让后续处理）
+                return False
+
+            # 列表类型的检查
+            elif isinstance(item, list):
+                if not item:
+                    return True
+
+            return False
+
+        except Exception:
+            return True
 
     def _parse_single_item(self, item, index: int) -> Optional[VideoRecord]:
         """
@@ -347,32 +417,33 @@ class APIClient:
     def _parse_string_format(self, item: str, index: int) -> Optional[VideoRecord]:
         """解析字符串格式的数据（可能是JSON字符串）"""
         try:
+            # 预先检查和清理字符串
+            item = item.strip()
+
+            # 跳过明显无效的数据，但不输出警告（避免噪音）
+            if not item or len(item) < 5:
+                return None
+
+            # 检查是否是对象表示（静默跳过）
+            if ('<' in item and 'object at 0x' in item and '>' in item) or \
+               (item.startswith('<') and item.endswith('>') and 'object' in item) or \
+               item.strip() in ['None', 'null', '{}', '[]', '""', "''"] or \
+               item.strip().lower() in ['undefined', 'nan']:
+                return None
+
             # 尝试解析为JSON
-            if item.strip().startswith('{') and item.strip().endswith('}'):
-                import json
+            if item.startswith('{') and item.endswith('}'):
                 try:
                     item_dict = json.loads(item)
                     return self._parse_dict_format(item_dict, index)
-                except json.JSONDecodeError as e:
-                    print(f"⚠️ 第 {index} 条数据：JSON解析失败 ({e})，当作普通字符串处理")
+                except json.JSONDecodeError:
+                    # JSON解析失败，继续当作普通字符串处理
+                    pass
 
-            # 如果是普通字符串，当作description处理
-            if len(item.strip()) > 0:
-                # 改进的对象表示检测 - 更精确地识别无效的对象字符串
-                if ('<' in item and 'object at 0x' in item and '>' in item) or \
-                   (item.startswith('<') and item.endswith('>') and 'object' in item):
-                    print(f"⚠️ 跳过第 {index} 条数据：字符串是对象表示")
-                    return None
-
-                # 检查是否是明显的错误数据
-                if item.strip() in ['None', 'null', '{}', '[]', '""', "''"] or \
-                   item.strip().lower() in ['undefined', 'nan']:
-                    print(f"⚠️ 跳过第 {index} 条数据：空值或无效数据")
-                    return None
-
-                # 尝试将字符串当作有效的description处理
+            # 验证字符串是否包含有意义的内容
+            if self._is_meaningful_content(item):
                 item_dict = {
-                    'description': item.strip(),
+                    'description': item,
                     'cover': '',
                     'url': ''
                 }
@@ -382,21 +453,31 @@ class APIClient:
                     # 验证解析结果
                     if video_record.title and len(video_record.title.strip()) > 0:
                         return video_record
-                    else:
-                        print(f"⚠️ 跳过第 {index} 条数据：解析后标题为空")
-                        return None
-                except Exception as e:
-                    print(f"⚠️ 跳过第 {index} 条数据：解析失败 - {e}")
-                    return None
+                except Exception:
+                    pass
 
-            else:
-                print(f"⚠️ 跳过第 {index} 条数据：空字符串")
-                return None
+            return None
 
         except Exception as e:
-            print(f"❌ 字符串格式解析失败 (第 {index} 条): {e}")
-            print(f"   字符串内容: {repr(item[:100])}...")
+            # 只在真正的异常情况下输出错误
+            if "解析失败" not in str(e):
+                print(f"❌ 字符串格式解析异常 (第 {index} 条): {e}")
             return None
+
+    def _is_meaningful_content(self, content: str) -> bool:
+        """检查内容是否有意义"""
+        if not content or len(content.strip()) < 10:
+            return False
+
+        # 排除HTML标签
+        if content.startswith('<') and content.endswith('>'):
+            return False
+
+        # 排除纯数字或特殊字符
+        if content.isdigit() or not any(c.isalnum() for c in content):
+            return False
+
+        return True
 
     def _parse_list_format(self, item: list, index: int) -> Optional[VideoRecord]:
         """解析列表格式的数据"""
@@ -508,6 +589,53 @@ class APIClient:
         print(f"📊 带重试的API解析完成，共处理 {len(video_records)} 条数据")
         return video_records
 
+    def fetch_and_parse_videos_with_retry_enhanced(self,
+                                                  size: int = 50,
+                                                  max_retries: int = 3,
+                                                  retry_delay: float = 1.0,
+                                                  backoff_factor: float = 2.0,
+                                                  use_enhanced_parsing: bool = True) -> List[VideoRecord]:
+        """
+        带重试机制和增强JSON解析的API请求和数据解析
+
+        Args:
+            size (int): 每页返回的数据条数
+            max_retries (int): 最大重试次数
+            retry_delay (float): 初始重试延迟时间（秒）
+            backoff_factor (float): 延迟时间递增因子
+            use_enhanced_parsing (bool): 是否使用增强JSON解析
+
+        Returns:
+            List[VideoRecord]: 解析后的视频记录列表
+        """
+        print("🚀 开始执行带重试机制的增强API解析...")
+        print(f"📊 请求数据条数: {size}")
+        print(f"🔄 最大重试次数: {max_retries}")
+        print(f"🔍 增强解析: {'启用' if use_enhanced_parsing else '禁用'}")
+
+        # 1. 使用重试机制获取API数据
+        api_data = self.fetch_api_data_with_retry(
+            size=size,
+            max_retries=max_retries,
+            retry_delay=retry_delay,
+            backoff_factor=backoff_factor
+        )
+
+        if not api_data:
+            print("❌ 重试后仍无法获取API数据")
+            return []
+
+        # 2. 根据选择使用不同的解析方式
+        if use_enhanced_parsing:
+            print("🔍 使用增强JSON解析器处理API数据...")
+            video_records = self.parse_api_response_enhanced(api_data)
+        else:
+            print("📋 使用标准解析器处理API数据...")
+            video_records = self.parse_items_to_video_records(api_data)
+
+        print(f"📊 带重试的增强API解析完成，共处理 {len(video_records)} 条数据")
+        return video_records
+
     def fetch_multiple_pages_with_retry(self,
                                         pages: List[int],
                                         size: int = 50,
@@ -565,6 +693,79 @@ class APIClient:
                 print(f"❌ 第 {page_num} 页处理异常: {e}")
 
         print(f"\n📊 多页请求完成:")
+        print(f"✅ 成功页面: {successful_pages}")
+        print(f"❌ 失败页面: {failed_pages}")
+        print(f"📋 总记录数: {len(all_video_records)}")
+
+        return all_video_records
+
+    def fetch_multiple_pages_with_retry_enhanced(self,
+                                                pages: List[int],
+                                                size: int = 50,
+                                                max_retries: int = 3,
+                                                retry_delay: float = 1.0,
+                                                page_delay: float = 0.5,
+                                                use_enhanced_parsing: bool = True) -> List[VideoRecord]:
+        """
+        带重试机制和增强JSON解析的多页API数据获取
+
+        Args:
+            pages (List[int]): 要获取的页码列表
+            size (int): 每页返回的数据条数
+            max_retries (int): 每页的最大重试次数
+            retry_delay (float): 重试延迟时间
+            page_delay (float): 页面间的延迟时间
+            use_enhanced_parsing (bool): 是否使用增强JSON解析
+
+        Returns:
+            List[VideoRecord]: 所有页面解析后的视频记录列表
+        """
+        all_video_records = []
+        successful_pages = 0
+        failed_pages = 0
+
+        print(f"🚀 开始多页增强API请求，共 {len(pages)} 页")
+        print(f"📄 页码: {pages}")
+        print(f"🔍 增强解析: {'启用' if use_enhanced_parsing else '禁用'}")
+
+        for i, page_num in enumerate(pages, 1):
+            print(f"\n📄 处理第 {i}/{len(pages)} 页 (页码: {page_num})")
+
+            try:
+                # 页面间延迟，避免请求过于频繁
+                if i > 1:
+                    print(f"⏳ 页面间延迟 {page_delay} 秒...")
+                    time.sleep(page_delay)
+
+                # 获取页面数据
+                page_data = self.fetch_page_data_with_retry(
+                    page=page_num,
+                    size=size,
+                    max_retries=max_retries,
+                    retry_delay=retry_delay
+                )
+
+                if page_data:
+                    # 根据选择使用不同的解析方式
+                    if use_enhanced_parsing:
+                        print(f"🔍 使用增强解析器处理第 {page_num} 页数据...")
+                        page_records = self.parse_api_response_enhanced(page_data)
+                    else:
+                        print(f"📋 使用标准解析器处理第 {page_num} 页数据...")
+                        page_records = self.parse_items_to_video_records(page_data)
+
+                    all_video_records.extend(page_records)
+                    successful_pages += 1
+                    print(f"✅ 第 {page_num} 页处理完成，获得 {len(page_records)} 条记录")
+                else:
+                    failed_pages += 1
+                    print(f"❌ 第 {page_num} 页获取失败")
+
+            except Exception as e:
+                failed_pages += 1
+                print(f"❌ 第 {page_num} 页处理异常: {e}")
+
+        print(f"\n📊 多页增强请求完成:")
         print(f"✅ 成功页面: {successful_pages}")
         print(f"❌ 失败页面: {failed_pages}")
         print(f"📋 总记录数: {len(all_video_records)}")
@@ -742,3 +943,72 @@ class APIClient:
             likes = item.get('likes_count', 0)
             comments = item.get('comments_count', 0)
             print(f"{i}. {title} (👍{likes} 💬{comments})")
+
+    def parse_api_response_enhanced(self, api_data: Dict[str, Any]) -> List[VideoRecord]:
+        """
+        使用增强JSON解析器处理API响应数据
+
+        Args:
+            api_data (Dict[str, Any]): API返回的数据
+
+        Returns:
+            List[VideoRecord]: 解析后的视频记录列表
+        """
+        print("🔍 使用增强JSON解析器处理API响应...")
+
+        # 创建增强解析器实例
+        parser = EnhancedJSONParser()
+
+        # 使用增强解析器处理数据
+        parsed_data = parser.parse_api_response(api_data)
+
+        # 获取解析后的items
+        items = parsed_data.get('items', [])
+        if not items:
+            print("⚠️ 增强解析器未找到有效的items数据")
+            return []
+
+        video_records = []
+        for i, item in enumerate(items):
+            try:
+                # 确保item是字典格式
+                if not isinstance(item, dict):
+                    print(f"⚠️ 跳过第 {i+1} 条：不是字典格式")
+                    continue
+
+                # 检查必要字段
+                if not any(key in item for key in ['description', 'title', 'content']):
+                    print(f"⚠️ 跳过第 {i+1} 条：缺少必要字段")
+                    continue
+
+                # 准备标准化数据
+                description = item.get('description', '') or item.get('content', '') or item.get('title', '')
+                if not description:
+                    continue
+
+                standardized_data = {
+                    'description': str(description),
+                    'cover': item.get('cover', ''),
+                    'url': item.get('url', ''),
+                    'id': item.get('id', ''),
+                    'title': item.get('title', '')
+                }
+
+                # 创建VideoRecord
+                video_record = VideoRecord.from_api_data(standardized_data)
+                if video_record and video_record.title:
+                    video_records.append(video_record)
+                    print(f"✅ 增强解析第 {i+1} 条：{video_record.title}")
+
+            except Exception as e:
+                print(f"❌ 增强解析第 {i+1} 条失败: {e}")
+                continue
+
+        # 输出解析统计
+        stats = parser.get_parse_stats()
+        print(f"📊 增强解析完成 - 成功: {len(video_records)}")
+        print(f"   字符串对象解析: {stats['string_object_parses']}")
+        print(f"   JSON字符串解析: {stats['json_string_parses']}")
+        print(f"   降级解析: {stats['fallback_parses']}")
+
+        return video_records
