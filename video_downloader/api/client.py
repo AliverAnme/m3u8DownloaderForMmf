@@ -23,6 +23,10 @@ class APIClient:
 
     def __init__(self):
         self.config = Config()
+        # 创建会话，禁用代理
+        self.session = requests.Session()
+        self.session.trust_env = False  # 不使用环境变量中的代理设置
+        self.session.proxies = {}  # 清空代理设置
 
     def fetch_api_data_with_retry(self,
                                   size: int = 50,
@@ -103,7 +107,7 @@ class APIClient:
             print(f"🔒 SSL验证: {'启用' if verify_ssl else '禁用'}")
 
             # 发送请求
-            response = requests.get(
+            response = self.session.get(
                 base_url,
                 params=params,
                 headers=headers,
@@ -854,7 +858,7 @@ class APIClient:
             print(f"🔒 SSL验证: {'启用' if verify_ssl else '禁用'}")
 
             # 发送请求
-            response = requests.get(
+            response = self.session.get(
                 base_url,
                 params=params,
                 headers=headers,
@@ -1012,3 +1016,87 @@ class APIClient:
         print(f"   降级解析: {stats['fallback_parses']}")
 
         return video_records
+
+    def _extract_uid_from_item(self, item: Dict[str, Any]) -> str:
+        """从数据项中提取UID字段"""
+        if not isinstance(item, dict):
+            return ""
+
+        # 直接查找uid字段
+        if 'uid' in item and item['uid']:
+            return str(item['uid']).strip()
+
+        # 在URL中查找UID
+        url = item.get('url', '')
+        if url and isinstance(url, str):
+            # 查找类似 videodelivery.net/{uid}/manifest 的模式
+            match = re.search(r'videodelivery\.net/([^/]+)/manifest', url)
+            if match:
+                return match.group(1)
+
+        # 在描述中查找UID模式
+        description = item.get('description', '') or item.get('content', '')
+        if description and isinstance(description, str):
+            # 查找"uid="后面的内容
+            match = re.search(r'uid[=:]\s*([a-f0-9]{32})', description, re.IGNORECASE)
+            if match:
+                return match.group(1)
+
+            # 查找32位十六进制字符串（UID的常见格式）
+            match = re.search(r'\b([a-f0-9]{32})\b', description, re.IGNORECASE)
+            if match:
+                return match.group(1)
+
+        return ""
+
+    def _parse_single_item(self, item, index: int) -> Optional[VideoRecord]:
+        """
+        解析单个数据项为VideoRecord
+
+        Args:
+            item: 单个数据项（可能是字典、对象或其他格式）
+            index: 数据项索引（用于错误提示）
+
+        Returns:
+            Optional[VideoRecord]: 解析成功返回VideoRecord，失败返回None
+        """
+        try:
+            # 确保item是字典类型
+            if not isinstance(item, dict):
+                return None
+
+            # 提取基本字段
+            description = item.get('description', '') or item.get('content', '') or item.get('title', '')
+            cover = item.get('cover', '')
+            url = item.get('url', '')
+
+            # 提取UID字段
+            uid = self._extract_uid_from_item(item)
+
+            # 如果没有描述信息，跳过
+            if not description:
+                return None
+
+            # 标准化数据格式
+            standardized_data = {
+                'description': str(description),
+                'cover': cover,
+                'url': url,
+                'id': item.get('id', ''),
+                'title': item.get('title', ''),
+                'uid': uid
+            }
+
+            # 创建VideoRecord实例
+            video_record = VideoRecord.from_api_data(standardized_data)
+
+            # 如果有UID但没有原始URL，使用UID生成新URL
+            if uid and not url:
+                video_record.url = f"https://videodelivery.net/{uid}/manifest/video.m3u8"
+                video_record.is_primer = False
+
+            return video_record if video_record and video_record.title else None
+
+        except Exception as e:
+            print(f"❌ 解析第 {index} 条数据失败: {e}")
+            return None

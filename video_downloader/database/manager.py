@@ -27,32 +27,54 @@ class DatabaseManager:
         """初始化数据库表"""
         with self._lock:
             try:
+                print(f"🔧 正在初始化数据库: {self.db_path}")
+
+                # 确保数据库文件的目录存在
+                db_dir = os.path.dirname(self.db_path)
+                if db_dir and not os.path.exists(db_dir):
+                    os.makedirs(db_dir, exist_ok=True)
+                    print(f"📁 创建数据库目录: {db_dir}")
+
                 with self.get_connection() as conn:
                     cursor = conn.cursor()
                     
                     # 启用外键约束
                     cursor.execute('PRAGMA foreign_keys = ON')
                     
-                    # 创建视频表（按照新的字段设计）
-                    cursor.execute('''
-                        CREATE TABLE IF NOT EXISTS videos (
-                            title TEXT NOT NULL,
-                            video_date TEXT NOT NULL,
-                            cover TEXT,
-                            url TEXT,
-                            description TEXT,
-                            download BOOLEAN DEFAULT 0,
-                            is_primer BOOLEAN DEFAULT 0,
-                            created_at TEXT NOT NULL,
-                            updated_at TEXT NOT NULL,
-                            PRIMARY KEY (title, video_date),
-                            CONSTRAINT valid_dates CHECK (
-                                datetime(created_at) IS NOT NULL AND 
-                                datetime(updated_at) IS NOT NULL
+                    # 检查是否需要添加uid列（兼容旧数据库）
+                    cursor.execute("PRAGMA table_info(videos)")
+                    columns = [column[1] for column in cursor.fetchall()]
+
+                    if 'videos' not in [table[0] for table in cursor.execute("SELECT name FROM sqlite_master WHERE type='table'").fetchall()]:
+                        print("📋 创建新的videos表...")
+                        # 创建视频表（按照新的字段设计）
+                        cursor.execute('''
+                            CREATE TABLE videos (
+                                title TEXT NOT NULL,
+                                video_date TEXT NOT NULL,
+                                cover TEXT,
+                                url TEXT,
+                                description TEXT,
+                                uid TEXT,
+                                download BOOLEAN DEFAULT 0,
+                                is_primer BOOLEAN DEFAULT 0,
+                                created_at TEXT NOT NULL,
+                                updated_at TEXT NOT NULL,
+                                PRIMARY KEY (title, video_date),
+                                CONSTRAINT valid_dates CHECK (
+                                    datetime(created_at) IS NOT NULL AND 
+                                    datetime(updated_at) IS NOT NULL
+                                )
                             )
-                        )
-                    ''')
-                    
+                        ''')
+                        print("✅ videos表创建成功")
+                    else:
+                        # 检查是否需要添加uid列
+                        if 'uid' not in columns:
+                            print("🔧 添加uid列到现有表...")
+                            cursor.execute('ALTER TABLE videos ADD COLUMN uid TEXT')
+                            print("✅ uid列添加成功")
+
                     # 创建下载历史表
                     cursor.execute('''
                         CREATE TABLE IF NOT EXISTS download_history (
@@ -72,11 +94,25 @@ class DatabaseManager:
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_video_date ON videos(video_date)')
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_title ON videos(title)')
                     cursor.execute('CREATE INDEX IF NOT EXISTS idx_is_primer ON videos(is_primer)')
+                    cursor.execute('CREATE INDEX IF NOT EXISTS idx_uid ON videos(uid)')
 
                     conn.commit()
-                    
+                    print(f"✅ 数据库初始化完成: {self.db_path}")
+
+                    # 验证表是否创建成功
+                    cursor.execute("SELECT name FROM sqlite_master WHERE type='table'")
+                    tables = [table[0] for table in cursor.fetchall()]
+                    print(f"📊 数据库表: {tables}")
+
             except sqlite3.Error as e:
                 print(f"❌ 数据库初始化失败: {e}")
+                print(f"💡 数据库路径: {self.db_path}")
+                print(f"💡 路径是否存在: {os.path.exists(self.db_path)}")
+                raise
+            except Exception as e:
+                print(f"❌ 数据库初始化异常: {e}")
+                import traceback
+                traceback.print_exc()
                 raise
     
     @contextmanager
@@ -119,6 +155,7 @@ class DatabaseManager:
                                 cover = ?,
                                 url = ?,
                                 description = ?,
+                                uid = ?,
                                 is_primer = ?,
                                 updated_at = ?
                             WHERE title = ? AND video_date = ?
@@ -126,6 +163,7 @@ class DatabaseManager:
                             video.cover,
                             video.url,
                             video.description,
+                            video.uid,
                             video.is_primer,
                             datetime.now().isoformat(),
                             video.title,
@@ -135,15 +173,16 @@ class DatabaseManager:
                         # 插入新记录
                         cursor.execute('''
                             INSERT INTO videos (
-                                title, video_date, cover, url, description,
+                                title, video_date, cover, url, description, uid,
                                 download, is_primer, created_at, updated_at
-                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ''', (
                             video.title,
                             video.video_date,
                             video.cover,
                             video.url,
                             video.description,
+                            video.uid,
                             video.download,
                             video.is_primer,
                             video.created_at.isoformat(),
@@ -329,12 +368,20 @@ class DatabaseManager:
 
     def _row_to_video_record(self, row) -> VideoRecord:
         """将数据库行转换为VideoRecord对象"""
+        # 处理uid字段，支持旧数据库没有uid字段的情况
+        try:
+            # 检查列是否存在
+            uid = row['uid'] if 'uid' in row.keys() else None
+        except (KeyError, IndexError):
+            uid = None
+
         return VideoRecord(
             title=row['title'],
             video_date=row['video_date'],
             cover=row['cover'],
             url=row['url'],
             description=row['description'],
+            uid=uid,
             download=bool(row['download']),
             is_primer=bool(row['is_primer']),
             created_at=datetime.fromisoformat(row['created_at']) if row['created_at'] else None,
