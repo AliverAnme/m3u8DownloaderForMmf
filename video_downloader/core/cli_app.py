@@ -4,6 +4,7 @@
 
 import os
 import importlib
+import time
 from typing import List
 
 from ..api.client import APIClient
@@ -53,12 +54,16 @@ class CLIVideoDownloaderApp:
                 if choice == '1':
                     self.handle_api_parsing()
                 elif choice == '2':
-                    self.handle_download_menu()
+                    self.handle_local_json_parsing()  # 本地JSON解析功能
                 elif choice == '3':
-                    self.handle_view_database()
+                    self.handle_feed_parsing()  # feed解析功能
                 elif choice == '4':
-                    self.handle_sync_directory()
+                    self.handle_download_menu()
                 elif choice == '5':
+                    self.handle_view_database()
+                elif choice == '6':
+                    self.handle_sync_directory()
+                elif choice == '7':
                     break
 
                 self.ui.wait_for_enter()
@@ -683,3 +688,118 @@ class CLIVideoDownloaderApp:
             self.download_manager.cleanup_temp_files()
         except Exception as e:
             print(f"清理资源时发生错误: {e}")
+
+    def handle_local_json_parsing(self):
+        """处理本地JSON文件解析操作"""
+        try:
+            self.ui.show_info("📂 启动本地JSON文件解析功能...")
+
+            # 获取JSON文件路径
+            file_path = self.ui.get_json_file_path_input()
+            if not file_path or not os.path.exists(file_path):
+                self.ui.show_warning("❌ 文件不存在或路径无效")
+                return
+
+            self.ui.show_info(f"📖 正在解析文件: {file_path}")
+
+            # 使用数据处理器解析本地JSON，提取UID字段
+            from ..utils.data_processor import DataProcessor
+            processor = DataProcessor()
+
+            # 使用专门的UID解析方法
+            processed_items = processor.parse_local_json_with_uid(file_path)
+
+            if not processed_items:
+                self.ui.show_warning("❌ 文件中没有找到有效的数据")
+                return
+
+            # 转换为VideoRecord
+            video_records = []
+            uid_found_count = 0
+
+            for i, item in enumerate(processed_items):
+                try:
+                    # 创建VideoRecord实例
+                    video_record = VideoRecord.from_api_data(item)
+                    if video_record and video_record.title:
+                        video_records.append(video_record)
+                        if video_record.uid:
+                            uid_found_count += 1
+                            print(f"✅ 第 {i+1} 条：{video_record.title} (UID: {video_record.uid})")
+                        else:
+                            print(f"⚠️ 第 {i+1} 条：{video_record.title} (无UID)")
+                except Exception as e:
+                    print(f"❌ 第 {i+1} 条数据转换失败: {e}")
+                    continue
+
+            if not video_records:
+                self.ui.show_warning("❌ 本地JSON解析未获取到任何有效视频数据")
+                return
+
+            # 显示解析统计
+            print(f"\n📊 本地JSON解析统计:")
+            print(f"   总处理数据: {len(processed_items)}")
+            print(f"   成功解析: {len(video_records)}")
+            print(f"   包含UID: {uid_found_count}")
+            print(f"   生成新URL: {uid_found_count}")
+
+            # 处理解析结果
+            self.ui.show_success(f"✅ 本地JSON解析成功，获得 {len(video_records)} 条视频记录，其中 {uid_found_count} 条包含UID")
+            self._process_video_records(video_records)
+
+        except Exception as e:
+            self.ui.show_error(f"❌ 本地JSON解析失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def handle_feed_parsing(self):
+        """处理feed文件批量解析操作"""
+        try:
+            self.ui.show_info("📋 启动Feed文件批量解析功能...")
+
+            # 获取feed文件路径
+            file_path = self.ui.get_feed_file_path_input()
+            if not file_path:
+                self.ui.show_warning("❌ 未指定有效的Feed文件路径")
+                return
+
+            # 获取请求设置
+            request_delay = self.ui.get_request_delay_input()
+
+            # 确认操作
+            if not self.ui.confirm_action(f"确认开始Feed文件批量解析？\n文件: {file_path}\n请求间隔: {request_delay}秒"):
+                return
+
+            # 创建feed解析器
+            from ..api.feed_parser import FeedParser
+            feed_parser = FeedParser()
+
+            # 设置请求延迟
+            feed_parser.request_delay = request_delay
+
+            self.ui.show_info("🚀 开始批量处理Feed文件...")
+
+            # 执行批量处理
+            video_records = feed_parser.batch_process_feed(file_path)
+
+            if not video_records:
+                self.ui.show_warning("❌ Feed文件批量解析未获取到任何有效视频数据")
+                return
+
+            # 保存缓存文件
+            cache_file_path = os.path.join(self.config.DATA_DIR, f"feed_cache_{int(time.time())}.json")
+            feed_parser.save_cache_file(video_records, cache_file_path)
+
+            # 处理解析结果
+            self.ui.show_success(f"✅ Feed文件批量解析成功，获得 {len(video_records)} 条视频记录")
+
+            # 询问是否写入数据库
+            if self.ui.confirm_action("是否将解析结果写入数据库？"):
+                self._process_video_records(video_records)
+            else:
+                self.ui.show_info(f"解析结果已保存到缓存文件: {cache_file_path}")
+
+        except Exception as e:
+            self.ui.show_error(f"❌ Feed文件批量解析失败: {e}")
+            import traceback
+            traceback.print_exc()

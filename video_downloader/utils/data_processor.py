@@ -251,3 +251,105 @@ class DataProcessor:
             output_file (str): 输出文件名
         """
         self.save_extracted_data(extracted_data, output_file)
+
+    def parse_local_json_with_uid(self, file_path: str) -> List[Dict[str, Any]]:
+        """
+        从本地JSON文件解析数据，特别提取UID字段
+
+        Args:
+            file_path (str): JSON文件路径
+
+        Returns:
+            List[Dict[str, Any]]: 解析后的数据列表，包含UID字段
+        """
+        try:
+            json_data = self.read_json_file_enhanced(file_path)
+
+            if not json_data or 'items' not in json_data:
+                print("❌ JSON文件中没有找到有效的items数据")
+                return []
+
+            items = json_data['items']
+            processed_items = []
+
+            print(f"📋 开始解析 {len(items)} 条数据项，查找UID字段...")
+
+            for i, item in enumerate(items):
+                try:
+                    if isinstance(item, dict):
+                        # 提取UID字段
+                        uid = self._extract_uid_from_item(item)
+
+                        # 创建标准化的数据项
+                        processed_item = {
+                            'description': item.get('description', '') or item.get('content', '') or item.get('title', ''),
+                            'cover': item.get('cover', ''),
+                            'url': item.get('url', ''),
+                            'id': item.get('id', ''),
+                            'title': item.get('title', ''),
+                            'uid': uid
+                        }
+
+                        # 只有当描述信息存在时才添加
+                        if processed_item['description']:
+                            processed_items.append(processed_item)
+                            if uid:
+                                print(f"✅ 第 {i+1} 条：找到UID = {uid}")
+                            else:
+                                print(f"⚠️ 第 {i+1} 条：未找到UID字段")
+
+                except Exception as e:
+                    print(f"❌ 处理第 {i+1} 条数据时出错: {e}")
+                    continue
+
+            print(f"🎯 本地JSON解析完成 - 成功处理: {len(processed_items)} 条")
+            uid_count = sum(1 for item in processed_items if item.get('uid'))
+            print(f"📊 找到UID的数据: {uid_count} 条")
+
+            return processed_items
+
+        except Exception as e:
+            print(f"❌ 解析本地JSON文件失败: {e}")
+            return []
+
+    def _extract_uid_from_item(self, item: Dict[str, Any]) -> str:
+        """
+        从数据项中提取UID字段
+
+        Args:
+            item (Dict[str, Any]): 数据项
+
+        Returns:
+            str: 提取的UID，如果没有找到则返回空字符串
+        """
+        if not isinstance(item, dict):
+            return ""
+
+        # 直接查找uid字段
+        if 'uid' in item and item['uid']:
+            return str(item['uid']).strip()
+
+        # 在URL中查找UID
+        url = item.get('url', '')
+        if url and isinstance(url, str):
+            # 查找类似 videodelivery.net/{uid}/manifest 的模式
+            import re
+            match = re.search(r'videodelivery\.net/([^/]+)/manifest', url)
+            if match:
+                return match.group(1)
+
+        # 在描述中查找UID模式
+        description = item.get('description', '') or item.get('content', '')
+        if description and isinstance(description, str):
+            import re
+            # 查找"uid="后面的内容
+            match = re.search(r'uid[=:]\s*([a-f0-9]{32})', description, re.IGNORECASE)
+            if match:
+                return match.group(1)
+
+            # 查找32位十六进制字符串（UID的常见格式）
+            match = re.search(r'\b([a-f0-9]{32})\b', description, re.IGNORECASE)
+            if match:
+                return match.group(1)
+
+        return ""

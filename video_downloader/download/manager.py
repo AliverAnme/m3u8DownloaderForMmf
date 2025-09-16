@@ -6,12 +6,13 @@
 import os
 import subprocess
 import tempfile
-import time
 import re
 import shutil
-from pathlib import Path
-from typing import Optional, Dict, Any, List, Tuple
+import threading
+import time
+import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import Optional, Dict, Any, List, Tuple
 import requests
 import m3u8
 
@@ -24,6 +25,24 @@ class DownloadManager:
     def __init__(self):
         self.config = Config()
         self.temp_dir = tempfile.mkdtemp(prefix="video_download_")
+        # 创建会话，支持代理配置
+        self.session = requests.Session()
+        self.setup_session()
+
+    def setup_session(self):
+        """设置会话配置"""
+        if self.config.PROXY_ENABLED:
+            try:
+                proxies = self.config.get_proxy_config()
+                self.session.proxies.update(proxies)
+                print(f"🌐 已启用代理: {proxies}")
+            except Exception as e:
+                print(f"⚠️ 代理配置失败，使用直连: {e}")
+                self.session.trust_env = False
+                self.session.proxies = {}
+        else:
+            self.session.trust_env = False
+            self.session.proxies = {}
 
     def sanitize_filename(self, filename: str) -> str:
         """
@@ -75,6 +94,38 @@ class DownloadManager:
         except (subprocess.TimeoutExpired, FileNotFoundError):
             return False
 
+    def verify_m3u8_url(self, url: str) -> bool:
+        """验证M3U8 URL是否可访问"""
+        if not url:
+            return False
+
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Referer': url
+            }
+
+            # 发送HEAD请求检查URL是否可访问
+            response = self.session.head(url, headers=headers, timeout=15, allow_redirects=True)
+
+            # 如果HEAD请求失败，尝试GET请求获取前几个字节
+            if response.status_code != 200:
+                response = self.session.get(url, headers=headers, timeout=15, stream=True)
+                # 只读取前1024字节来验证
+                content = response.raw.read(1024)
+                response.close()
+
+                # 检查内容是否像M3U8文件
+                if response.status_code == 200:
+                    content_str = content.decode('utf-8', errors='ignore')
+                    return '#EXTM3U' in content_str or '.m3u8' in url.lower()
+
+            return response.status_code == 200
+
+        except Exception as e:
+            print(f"⚠️ 验证M3U8 URL失败: {e}")
+            return False
+
     def download_cover_image(self, cover_url: str, temp_dir: str) -> Optional[str]:
         """下载封面图片到临时目录"""
         if not cover_url:
@@ -83,10 +134,11 @@ class DownloadManager:
         try:
             print(f"📸 正在下载封面图片...")
             headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36',
+                'Referer': cover_url
             }
 
-            response = requests.get(cover_url, headers=headers, timeout=30)
+            response = self.session.get(cover_url, headers=headers, timeout=30)
             response.raise_for_status()
 
             # 获取文件扩展名
@@ -109,143 +161,508 @@ class DownloadManager:
             print(f"❌ 下载封面图片失败: {e}")
             return None
 
+    def parse_m3u8_playlist(self, m3u8_url: str) -> Optional[Dict]:
+        """解析M3U8播放列表，检测音视频流"""
+        try:
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': m3u8_url
+            }
+
+            response = self.session.get(m3u8_url, headers=headers, timeout=30)
+            response.raise_for_status()
+
+            playlist = m3u8.loads(response.text)
+
+            # 检查是否是主播放列表（包含多个质量的流）
+            if playlist.is_variant:
+                print(f"📺 发现多质量流，正在分析...")
+
+                # 分析音视频流
+                video_streams = []
+                audio_streams = []
+                mixed_streams = []
+
+                # 收集所有的媒体组信息
+                audio_groups = {}
+                video_groups = {}
+                subtitle_groups = {}
+
+                # 首先解析媒体组
+                if hasattr(playlist, 'media') and playlist.media:
+                    for media in playlist.media:
+                        media_info = {
+                            'url': urllib.parse.urljoin(m3u8_url, media.uri) if media.uri else None,
+                            'name': media.name or f"Track {media.group_id}",
+                            'language': getattr(media, 'language', 'und'),
+                            'default': getattr(media, 'default', False),
+                            'autoselect': getattr(media, 'autoselect', False),
+                            'group_id': media.group_id,
+                            'characteristics': getattr(media, 'characteristics', None)
+                        }
+
+                        if media.type == 'AUDIO':
+                            audio_groups[media.group_id] = media_info
+                            print(f"🎵 发现音频组: {media.group_id} - {media_info['name']} ({media_info['language']}) URL: {media_info['url']}")
+                        elif media.type == 'VIDEO':
+                            video_groups[media.group_id] = media_info
+                            print(f"🎬 发现视频组: {media.group_id} - {media_info['name']}")
+                        elif media.type == 'SUBTITLES':
+                            subtitle_groups[media.group_id] = media_info
+                            print(f"📝 发现字幕组: {media.group_id} - {media_info['name']} ({media_info['language']})")
+
+                # 分析播放列表中的流
+                for stream in playlist.playlists:
+                    stream_info = stream.stream_info
+                    stream_data = {
+                        'url': urllib.parse.urljoin(m3u8_url, stream.uri),
+                        'bandwidth': stream_info.bandwidth or 0,
+                        'resolution': getattr(stream_info, 'resolution', None),
+                        'codecs': getattr(stream_info, 'codecs', None),
+                        'frame_rate': getattr(stream_info, 'frame_rate', None),
+                        'audio_group': getattr(stream_info, 'audio', None),
+                        'video_group': getattr(stream_info, 'video', None),
+                        'subtitle_group': getattr(stream_info, 'subtitles', None)
+                    }
+
+                    # 检查编码信息来判断流类型
+                    codecs = stream_data.get('codecs', '') or ''
+                    has_video_codec = any(codec in codecs.lower() for codec in ['avc1', 'hvc1', 'h264', 'h265', 'vp9', 'av01'])
+                    has_audio_codec = any(codec in codecs.lower() for codec in ['mp4a', 'aac', 'mp3', 'opus'])
+
+                    # 更精确的流分类
+                    if stream_data.get('resolution') and has_video_codec:
+                        # 有分辨率且有视频编码 - 视频流（可能引用音频组）
+                        video_streams.append(stream_data)
+                        print(f"📹 视频流: {stream_data['bandwidth']}bps, 分辨率: {stream_data.get('resolution', 'Unknown')}, 音频组: {stream_data['audio_group']}, 编码: {codecs}")
+                    elif not stream_data.get('resolution') and has_audio_codec and not has_video_codec:
+                        # 无分辨率且只有音频编码 - 纯音频流
+                        audio_streams.append(stream_data)
+                        print(f"🎵 纯音频流: {stream_data['bandwidth']}bps, 编码: {codecs}")
+                    else:
+                        # 混合流（包含音视频）
+                        mixed_streams.append(stream_data)
+                        resolution_str = f", 分辨率: {stream_data.get('resolution', 'Unknown')}" if stream_data.get('resolution') else ""
+                        print(f"🎬 混合流: {stream_data['bandwidth']}bps{resolution_str}, 编码: {codecs}")
+
+                # 决定使用哪种下载策略 - 优先检查视频流+音频组的组合
+                if video_streams and audio_groups:
+                    # 独立音视频流模式
+                    print(f"🎵 检测到独立音视频流模式: {len(video_streams)} 个视频流, {len(audio_groups)} 个音频组")
+
+                    # 选择最高质量的视频流
+                    best_video = max(video_streams, key=lambda x: (x['bandwidth'],
+                                                                  x.get('resolution', [0, 0])[0] if x.get('resolution') else 0))
+
+                    # 选择对应的音频流
+                    selected_audio = None
+                    audio_group_id = best_video.get('audio_group')
+
+                    if audio_group_id and audio_group_id in audio_groups:
+                        selected_audio = audio_groups[audio_group_id]
+                        print(f"🎯 匹配到音频组: {audio_group_id}")
+                    else:
+                        # 如果没有指定音频组，选择默认或第一个
+                        for group_id, audio_info in audio_groups.items():
+                            if audio_info.get('default', False) or selected_audio is None:
+                                selected_audio = audio_info
+                                print(f"🎯 使用默认音频组: {group_id}")
+                                break
+
+                    if selected_audio and selected_audio['url']:
+                        print(f"🎯 选择视频流: 码率 {best_video['bandwidth']}, 分辨率 {best_video.get('resolution', 'Unknown')}")
+                        print(f"🎵 选择音频流: {selected_audio['name']} ({selected_audio['language']}) - URL: {selected_audio['url']}")
+
+                        # 递归解析视频和音频流
+                        video_info = self.parse_m3u8_playlist(best_video['url'])
+                        audio_info = self.parse_m3u8_playlist(selected_audio['url'])
+
+                        if video_info and audio_info:
+                            return {
+                                'has_separate_audio': True,
+                                'video_stream': video_info,
+                                'audio_stream': audio_info,
+                                'video_url': best_video['url'],
+                                'audio_url': selected_audio['url']
+                            }
+                        else:
+                            print(f"⚠️ 无法解析独立音视频流，回退到混合流")
+
+                # 如果独立音视频流失败，尝试混合流
+                all_streams = mixed_streams + video_streams
+                if all_streams:
+                    # 选择最高质量的混合流或视频流
+                    best_stream = max(all_streams, key=lambda x: (x['bandwidth'],
+                                                                 x.get('resolution', [0, 0])[0] if x.get('resolution') else 0))
+                    print(f"🎯 选择混合流: 码率 {best_stream['bandwidth']}, 分辨率 {best_stream.get('resolution', 'Unknown')}")
+                    return self.parse_m3u8_playlist(best_stream['url'])
+
+                # 最后回退选择
+                if playlist.playlists:
+                    best_playlist = max(playlist.playlists, key=lambda x: x.stream_info.bandwidth or 0)
+                    best_url = urllib.parse.urljoin(m3u8_url, best_playlist.uri)
+                    print(f"🎯 回退选择流: {best_url} (码率: {best_playlist.stream_info.bandwidth})")
+                    return self.parse_m3u8_playlist(best_url)
+
+            else:
+                # 直接的媒体播放列表
+                base_url = m3u8_url.rsplit('/', 1)[0] + '/'
+                segments = []
+
+                for segment in playlist.segments:
+                    segment_url = urllib.parse.urljoin(base_url, segment.uri)
+                    segments.append({
+                        'url': segment_url,
+                        'duration': segment.duration,
+                        'byterange': getattr(segment, 'byterange', None)
+                    })
+
+                total_duration = sum(seg.get('duration', 0) for seg in segments)
+                print(f"📊 媒体播放列表: {len(segments)} 个片段, 总时长: {total_duration:.1f}秒")
+
+                return {
+                    'has_separate_audio': False,
+                    'segments': segments,
+                    'base_url': base_url,
+                    'total_segments': len(segments),
+                    'total_duration': total_duration
+                }
+
+        except Exception as e:
+            print(f"❌ 解析M3U8播放列表失败: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def download_segment(self, segment_info: Dict, segment_index: int, temp_dir: str) -> Optional[str]:
+        """下载单个视频片段"""
+        try:
+            segment_url = segment_info['url']
+            segment_filename = f"segment_{segment_index:05d}.ts"
+            segment_path = os.path.join(temp_dir, segment_filename)
+
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Referer': segment_url
+            }
+
+            for retry in range(self.config.MAX_RETRIES):
+                try:
+                    response = self.session.get(segment_url, headers=headers, timeout=30, stream=True)
+                    response.raise_for_status()
+
+                    with open(segment_path, 'wb') as f:
+                        for chunk in response.iter_content(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
+
+                    return segment_path
+
+                except Exception as e:
+                    if retry < self.config.MAX_RETRIES - 1:
+                        print(f"⚠️ 片段 {segment_index} 下载失败，重试 {retry + 1}/{self.config.MAX_RETRIES}: {e}")
+                        time.sleep(self.config.RETRY_DELAY)
+                    else:
+                        print(f"❌ 片段 {segment_index} 下载最终失败: {e}")
+                        return None
+
+        except Exception as e:
+            print(f"❌ 下载片段 {segment_index} 异常: {e}")
+            return None
+
+    def download_m3u8_with_python(self, playlist_info: Dict, temp_dir: str, stream_type: str = "mixed") -> Optional[str]:
+        """使用Python下载M3U8流，支持音视频分离"""
+        try:
+            # 检查是否有分离的音视频流
+            if playlist_info.get('has_separate_audio', False):
+                print(f"🎵 检测到独立音视频流")
+                return None  # 对于分离流，使用ffmpeg处理更可靠
+
+            segments = playlist_info['segments']
+            total_segments = playlist_info['total_segments']
+
+            print(f"📊 发现 {total_segments} 个{stream_type}片段")
+
+            # 创建片段下载目录
+            segments_dir = os.path.join(temp_dir, f"{stream_type}_segments")
+            os.makedirs(segments_dir, exist_ok=True)
+
+            downloaded_segments = []
+
+            # 使用线程池并行下载片段
+            with ThreadPoolExecutor(max_workers=self.config.MAX_CONCURRENT_DOWNLOADS) as executor:
+                # 提交所有下载任务
+                future_to_index = {
+                    executor.submit(self.download_segment, segment, i, segments_dir): i
+                    for i, segment in enumerate(segments)
+                }
+
+                # 收集结果
+                for future in as_completed(future_to_index):
+                    segment_index = future_to_index[future]
+                    try:
+                        segment_path = future.result()
+                        if segment_path:
+                            downloaded_segments.append((segment_index, segment_path))
+                            print(f"✅ {stream_type}片段 {segment_index + 1}/{total_segments} 下载完成")
+                        else:
+                            print(f"❌ {stream_type}片段 {segment_index + 1} 下载失败")
+                    except Exception as e:
+                        print(f"❌ {stream_type}片段 {segment_index + 1} 下载异常: {e}")
+
+            # 按索引排序片段
+            downloaded_segments.sort(key=lambda x: x[0])
+
+            if not downloaded_segments:
+                print(f"❌ 没有成功下载任何{stream_type}片段")
+                return None
+
+            print(f"✅ 成功下载 {len(downloaded_segments)}/{total_segments} 个{stream_type}片段")
+
+            # 合并片段
+            return self.merge_ts_segments(downloaded_segments, temp_dir, stream_type)
+
+        except Exception as e:
+            print(f"❌ Python下载{stream_type}M3U8失败: {e}")
+            return None
+
+    def merge_ts_segments(self, segments: List[Tuple[int, str]], temp_dir: str, stream_type: str = "mixed") -> Optional[str]:
+        """合并TS片段为单个视频文件"""
+        try:
+            print(f"🔧 正在合并 {len(segments)} 个{stream_type}片段...")
+
+            # 创建片段列表文件
+            segments_list_file = os.path.join(temp_dir, f"{stream_type}_segments_list.txt")
+            with open(segments_list_file, 'w', encoding='utf-8') as f:
+                for _, segment_path in segments:
+                    # 使用相对路径避免路径问题
+                    relative_path = os.path.relpath(segment_path, temp_dir)
+                    f.write(f"file '{relative_path}'\n")
+
+            # 输出文件
+            if stream_type == "audio":
+                merged_file = os.path.join(temp_dir, "merged_audio.aac")
+                # 对音频流，直接复制不重新编码
+                codec_args = ['-c', 'copy']
+            else:
+                merged_file = os.path.join(temp_dir, "merged_video.mp4")
+                codec_args = ['-c', 'copy']
+
+            # 使用ffmpeg合并片段
+            cmd = [
+                'ffmpeg', '-y',
+                '-f', 'concat',
+                '-safe', '0',
+                '-i', segments_list_file,
+            ] + codec_args + [
+                '-avoid_negative_ts', 'make_zero',
+                merged_file
+            ]
+
+            print(f"🎯 执行{stream_type}合并命令: {' '.join(cmd)}")
+
+            # 修复编码问题
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8',
+                                  errors='ignore', timeout=self.config.FFMPEG_TIMEOUT, cwd=temp_dir)
+
+            if result.returncode == 0 and os.path.exists(merged_file):
+                file_size = os.path.getsize(merged_file)
+                print(f"✅ {stream_type}片段合并完成，文件大小: {file_size / 1024 / 1024:.2f} MB")
+                return merged_file
+            else:
+                print(f"❌ {stream_type}片段合并失败:")
+                print(f"返回码: {result.returncode}")
+                if result.stderr:
+                    print(f"错误信息: {result.stderr}")
+                return None
+
+        except Exception as e:
+            print(f"❌ 合并{stream_type}片段异常: {e}")
+            return None
+
     def download_m3u8_streams(self, url: str, temp_dir: str) -> Tuple[Optional[str], Optional[str]]:
-        """下载m3u8视频流和音频流"""
+        """下载m3u8视频流，支持音视频分离下载"""
         if not url:
             print("⚠️ URL为空，跳过下载")
             return None, None
 
         try:
-            print(f"🎬 正在解析m3u8流: {url}")
+            print(f"🎬 正在解析M3U8流: {url}")
 
-            # 解析m3u8
-            playlist = self.parse_m3u8(url)
-            if not playlist:
+            # 首先验证URL是否可访问
+            if not self.verify_m3u8_url(url):
+                print(f"❌ M3U8 URL无法访问: {url}")
                 return None, None
 
-            # 下载视频和音频流
-            video_path = self.download_stream(playlist, temp_dir, "video")
-            audio_path = self.download_stream(playlist, temp_dir, "audio")
+            # 解析M3U8播放列表
+            playlist_info = self.parse_m3u8_playlist(url)
+            if not playlist_info:
+                print("❌ 无法解析M3U8播放列表")
+                return None, None
 
-            return video_path, audio_path
+            # 检查是否有分离的音视频流
+            if playlist_info.get('has_separate_audio', False):
+                print("🎵 检测到独立的音视频流，开始分别下载...")
+
+                video_stream_info = playlist_info['video_stream']
+                audio_stream_info = playlist_info['audio_stream']
+                video_url = playlist_info.get('video_url')
+                audio_url = playlist_info.get('audio_url')
+
+                # 并行下载视频和音频流
+                video_path = None
+                audio_path = None
+
+                # 下载视频流
+                if video_stream_info:
+                    print("📹 下载视频流...")
+                    # 优先使用Python方式下载片段
+                    video_path = self.download_m3u8_with_python(video_stream_info, temp_dir, "video")
+
+                    # 如果失败，使用ffmpeg直接下载
+                    if not video_path and video_url:
+                        print("🔄 Python下载视频流失败，使用ffmpeg...")
+                        video_path = self.download_single_stream(video_url, temp_dir, "video")
+
+                # 下载音频流
+                if audio_stream_info:
+                    print("🎵 下载音频流...")
+                    # 优先使用Python方式下载片段
+                    audio_path = self.download_m3u8_with_python(audio_stream_info, temp_dir, "audio")
+
+                    # 如果失败，使用ffmpeg直接下载
+                    if not audio_path and audio_url:
+                        print("🔄 Python下载音频流失败，使用ffmpeg...")
+                        audio_path = self.download_single_stream(audio_url, temp_dir, "audio")
+
+                # 检查下载结果
+                if video_path and audio_path:
+                    print("✅ 音视频流下载完成")
+                    return video_path, audio_path
+                elif video_path:
+                    print("⚠️ 仅视频流下载成功，音频流下载失败")
+                    return video_path, None
+                else:
+                    print("❌ 音视频流下载均失败")
+                    # 如果独立流下载失败，尝试下载原始URL作为混合流
+                    print("🔄 尝试下载原始URL作为混合流...")
+                    mixed_path = self.download_single_stream(url, temp_dir, "mixed")
+                    return mixed_path, None
+            else:
+                # 混合流，使用原有逻辑
+                print("🎬 检测到混合音视频流")
+                video_path = self.download_m3u8_with_python(playlist_info, temp_dir, "mixed")
+
+                # 如果Python下载失败，回退到ffmpeg
+                if not video_path:
+                    print("🔄 Python下载失败，回退到ffmpeg下载...")
+                    video_path = self.download_single_stream(url, temp_dir, "mixed")
+
+                return video_path, None
 
         except Exception as e:
-            print(f"❌ 下载m3u8流失败: {e}")
+            print(f"❌ 下载M3U8流失败: {e}")
+            import traceback
+            traceback.print_exc()
             return None, None
 
-    def parse_m3u8(self, url: str) -> Optional[Any]:
-        """解析m3u8文件"""
+    def reconstruct_stream_url(self, base_url: str, stream_info: Dict) -> Optional[str]:
+        """从基础URL和流信息重构完整的流URL"""
         try:
-            headers = {
-                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-            }
+            # 如果流信息中有完整URL，直接使用
+            if 'url' in stream_info:
+                return stream_info['url']
 
-            response = requests.get(url, headers=headers, verify=False, timeout=30)
-            response.raise_for_status()
+            # 否则尝试从segments中获取base_url
+            if 'base_url' in stream_info:
+                return stream_info['base_url']
 
-            playlist = m3u8.loads(response.text)
-            playlist.base_uri = url.rsplit('/', 1)[0] + '/'
-
-            return playlist
-
-        except Exception as e:
-            print(f"❌ 解析M3U8文件失败: {e}")
+            # 如果都没有，返回None
             return None
 
-    def download_stream(self, playlist, temp_dir: str, stream_type: str) -> Optional[str]:
-        """下载视频或音频流"""
-        try:
-            output_file = os.path.join(temp_dir, f"{stream_type}.ts")
+        except Exception as e:
+            print(f"❌ 重构流URL失败: {e}")
+            return None
 
-            # 使用ffmpeg下载m3u8流
+    def download_single_stream(self, url: str, temp_dir: str, stream_type: str) -> Optional[str]:
+        """使用ffmpeg下载单个流文件"""
+        try:
+            # 根据流类型选择合适的输出格式
+            if stream_type == "audio":
+                output_file = os.path.join(temp_dir, f"{stream_type}.aac")
+            else:
+                output_file = os.path.join(temp_dir, f"{stream_type}.mp4")
+
+            # 使用ffmpeg下载m3u8流，添加更多参数提高成功率
             cmd = [
-                'ffmpeg',
-                '-i', playlist.base_uri if hasattr(playlist, 'base_uri') else str(playlist),
+                'ffmpeg', '-y',
+                '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                '-headers', 'Referer: ' + url,
+                '-reconnect', '1',
+                '-reconnect_streamed', '1',
+                '-reconnect_delay_max', '5',
+                '-i', url,
                 '-c', 'copy',
-                '-y',  # 覆盖现有文件
-                output_file
+                '-avoid_negative_ts', 'make_zero'
             ]
 
-            print(f"📥 正在下载{stream_type}流...")
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            # 对音频流添加特殊处理
+            if stream_type == "audio":
+                cmd.extend(['-vn'])  # 禁用视频流
+            else:
+                cmd.extend(['-bsf:a', 'aac_adtstoasc'])  # 修复AAC音频
+
+            cmd.append(output_file)
+
+            print(f"📥 正在使用ffmpeg下载{stream_type}流...")
+            print(f"🎯 执行命令: {' '.join(cmd)}")
+
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8',
+                                  errors='ignore', timeout=self.config.FFMPEG_TIMEOUT)
 
             if result.returncode == 0 and os.path.exists(output_file):
-                print(f"✅ {stream_type}流下载完成")
-                return output_file
+                file_size = os.path.getsize(output_file)
+                print(f"✅ {stream_type}流下载完成，文件大小: {file_size / 1024 / 1024:.2f} MB")
+
+                # 验证下载的文件是否有效
+                if self.verify_stream_file(output_file, stream_type):
+                    return output_file
+                else:
+                    print(f"⚠️ {stream_type}流文件验证失败")
+                    return None
             else:
-                print(f"❌ {stream_type}流下载失败: {result.stderr}")
+                print(f"❌ {stream_type}流下载失败:")
+                print(f"返回码: {result.returncode}")
+                if result.stderr:
+                    print(f"错误信息: {result.stderr}")
+                if result.stdout:
+                    print(f"输出信息: {result.stdout}")
                 return None
 
         except Exception as e:
             print(f"❌ 下载{stream_type}流异常: {e}")
             return None
 
-    def merge_video_with_cover(self, video_path: str, audio_path: str, cover_path: str, output_path: str) -> bool:
-        """使用ffmpeg合并音视频并嵌入封面"""
+    def verify_stream_file(self, file_path: str, stream_type: str) -> bool:
+        """验证下载的流文件是否有效"""
         try:
-            print(f"🔧 正在合并音视频并嵌入封面...")
-
-            # 构建ffmpeg命令
-            cmd = ['ffmpeg', '-y']  # -y 覆盖现有文件
-
-            # 添加输入文件
-            if video_path:
-                cmd.extend(['-i', video_path])
-            if audio_path:
-                cmd.extend(['-i', audio_path])
-            if cover_path:
-                cmd.extend(['-i', cover_path])
-
-            # 设置映射和编码参数
-            if video_path and audio_path and cover_path:
-                # 视频 + 音频 + 封面
-                cmd.extend([
-                    '-map', '0:v',  # 视频流
-                    '-map', '1:a',  # 音频流
-                    '-map', '2:v',  # 封面图片
-                    '-c:v', 'libx264',  # 视频编码
-                    '-c:a', 'aac',      # 音频编码
-                    '-disposition:v:1', 'attached_pic',  # 将封面设为附加图片
-                ])
-            elif video_path and cover_path:
-                # 仅视频 + 封面
-                cmd.extend([
-                    '-map', '0:v',
-                    '-map', '1:v',
-                    '-c:v', 'libx264',
-                    '-disposition:v:1', 'attached_pic',
-                ])
-            elif video_path and audio_path:
-                # 仅视频 + 音频
-                cmd.extend([
-                    '-map', '0:v',
-                    '-map', '1:a',
-                    '-c:v', 'libx264',
-                    '-c:a', 'aac',
-                ])
+            if stream_type == "audio":
+                # 验证音频文件
+                cmd = ['ffprobe', '-v', 'quiet', '-select_streams', 'a', '-show_entries', 'stream=codec_name,duration', '-of', 'csv=p=0', file_path]
             else:
-                print("❌ 没有足够的输入文件进行合并")
-                return False
+                # 验证视频文件
+                cmd = ['ffprobe', '-v', 'quiet', '-show_entries', 'stream=codec_name,duration', '-of', 'csv=p=0', file_path]
 
-            # 添加输出文件
-            cmd.append(output_path)
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
 
-            print(f"🎯 执行命令: {' '.join(cmd)}")
-
-            # 执行命令
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
-
-            if result.returncode == 0 and os.path.exists(output_path):
-                print(f"✅ 视频合并完成: {output_path}")
+            if result.returncode == 0 and result.stdout.strip():
+                print(f"✅ {stream_type}流文件验证成功")
                 return True
             else:
-                print(f"❌ 视频合并失败:")
-                print(f"stdout: {result.stdout}")
-                print(f"stderr: {result.stderr}")
+                print(f"❌ {stream_type}流文件验证失败")
                 return False
-
         except Exception as e:
-            print(f"❌ 视频合并异常: {e}")
+            print(f"⚠️ {stream_type}流文件验证异常: {e}")
             return False
 
     def download_video(self, video: VideoRecord, download_dir: str) -> bool:
@@ -261,89 +678,372 @@ class DownloadManager:
             safe_title = self.sanitize_filename(video.title)
             safe_date = self.sanitize_filename(video.video_date)
 
-            # 创建视频专用目录
-            video_dir = os.path.join(download_dir, f"{safe_title}_{safe_date}")
-            os.makedirs(video_dir, exist_ok=True)
-
-            # 创建临时目录
-            temp_dir = tempfile.mkdtemp(prefix=f"download_{safe_date}_")
+            # 创建临时工作目录，使用标题和日期的组合作为唯一标识符
+            temp_work_dir = os.path.join(self.temp_dir, f"video_{safe_title}_{safe_date}_{int(time.time())}")
+            os.makedirs(temp_work_dir, exist_ok=True)
 
             try:
                 # 1. 下载封面图片
-                cover_path = self.download_cover_image(video.cover, temp_dir)
+                cover_path = self.download_cover_image(video.cover, temp_work_dir)
 
-                # 2. 下载m3u8视频流和音频流
-                video_path, audio_path = self.download_m3u8_streams(video.url, temp_dir)
+                # 2. 下载视频流
+                video_path, audio_path = self.download_m3u8_streams(video.url, temp_work_dir)
 
-                if not video_path and not audio_path:
-                    print(f"❌ 无法下载任何媒体流")
+                if not video_path:
+                    print(f"❌ 视频下载失败: {video.title}")
                     return False
 
-                # 3. 合并音视频并嵌入封面
-                output_filename = f"{safe_title}_{safe_date}.mp4"
-                output_path = os.path.join(video_dir, output_filename)
+                # 3. 合并视频和封面 - 直接保存到下载目录，不创建子文件夹
+                output_filename = f"{safe_title}_{safe_date}.{self.config.OUTPUT_FORMAT}"
+                output_path = os.path.join(download_dir, output_filename)
 
-                success = self.merge_video_with_cover(
-                    video_path, audio_path, cover_path, output_path
-                )
+                success = self.merge_video_with_cover(video_path, audio_path, cover_path, output_path)
 
                 if success:
-                    print(f"🎉 下载完成: {output_path}")
+                    print(f"✅ 视频下载完成: {output_path}")
                     return True
                 else:
-                    print(f"❌ 视频处理失败")
+                    print(f"❌ 视频处理失败: {video.title}")
                     return False
 
             finally:
                 # 清理临时文件
                 try:
-                    shutil.rmtree(temp_dir)
-                    print(f"🧹 临时文件已清理")
-                except:
-                    pass
+                    shutil.rmtree(temp_work_dir)
+                except Exception as e:
+                    print(f"⚠️ 清理临时文件失败: {e}")
 
         except Exception as e:
-            print(f"❌ 下载视频失败: {e}")
+            print(f"❌ 下载视频异常: {video.title} - {e}")
             return False
 
-    def download_videos_by_date(self, videos: List[VideoRecord], download_dir: str, force: bool = False) -> Dict[str, int]:
-        """按日期下载视频"""
-        stats = {'success': 0, 'failed': 0, 'skipped': 0}
+    def download_videos_by_date(self, videos: List[VideoRecord], download_dir: str, force: bool = False) -> Dict[str, Any]:
+        """
+        批量下载视频列表
 
-        print(f"\n📁 开始批量下载，目标目录: {download_dir}")
-        print(f"🎯 待下载视频数量: {len(videos)}")
+        Args:
+            videos: 要下载的视频列表
+            download_dir: 下载目录
+            force: 是否强制下载（覆盖已存在的文件）
+
+        Returns:
+            Dict: 下载统计信息
+        """
+        if not videos:
+            print("⚠️ 没有视频需要下载")
+            return {
+                'total': 0,
+                'success': 0,
+                'failed': 0,
+                'skipped': 0,
+                'failed_videos': []
+            }
+
+        print(f"\n🎬 开始批量下载 {len(videos)} 个视频...")
+
+        stats = {
+            'total': len(videos),
+            'success': 0,
+            'failed': 0,
+            'skipped': 0,
+            'failed_videos': []
+        }
 
         for i, video in enumerate(videos, 1):
-            print(f"\n📺 [{i}/{len(videos)}] 处理: {video.title}")
+            try:
+                print(f"\n📊 进度: {i}/{len(videos)}")
 
-            # 检查是否需要跳过
-            if not force and video.download:
-                print(f"⏭️ 已下载，跳过")
-                stats['skipped'] += 1
-                continue
+                # 检查是否跳过付费视频
+                if video.is_primer:
+                    print(f"⚠️ 跳过付费视频: {video.title}")
+                    stats['skipped'] += 1
+                    continue
 
-            # 下载视频
-            if self.download_video(video, download_dir):
-                stats['success'] += 1
-            else:
+                # 检查文件是否已存在
+                if not force:
+                    safe_title = self.sanitize_filename(video.title)
+                    safe_date = self.sanitize_filename(video.video_date)
+                    output_filename = f"{safe_title}_{safe_date}.{self.config.OUTPUT_FORMAT}"
+                    output_path = os.path.join(download_dir, output_filename)
+
+                    if os.path.exists(output_path):
+                        print(f"📁 文件已存在，跳过: {video.title}")
+                        stats['skipped'] += 1
+                        continue
+
+                # 执行下载
+                success = self.download_video(video, download_dir)
+
+                if success:
+                    stats['success'] += 1
+                    print(f"✅ 下载成功: {video.title}")
+                else:
+                    stats['failed'] += 1
+                    stats['failed_videos'].append({
+                        'title': video.title,
+                        'date': video.video_date,
+                        'url': video.url
+                    })
+                    print(f"❌ 下载失败: {video.title}")
+
+                # 添加下载间隔
+                if i < len(videos):
+                    print(f"⏳ 等待 {self.config.DOWNLOAD_DELAY} 秒...")
+                    time.sleep(self.config.DOWNLOAD_DELAY)
+
+            except Exception as e:
                 stats['failed'] += 1
+                stats['failed_videos'].append({
+                    'title': video.title,
+                    'date': video.video_date,
+                    'url': video.url,
+                    'error': str(e)
+                })
+                print(f"❌ 下载异常: {video.title} - {e}")
 
-        print(f"\n📊 下载统计:")
-        print(f"✅ 成功: {stats['success']}")
-        print(f"❌ 失败: {stats['failed']}")
-        print(f"⏭️ 跳过: {stats['skipped']}")
+        # 显示最终统计
+        print(f"\n📊 批量下载完成:")
+        print(f"   总计: {stats['total']} 个")
+        print(f"   成功: {stats['success']} 个")
+        print(f"   失败: {stats['failed']} 个")
+        print(f"   跳过: {stats['skipped']} 个")
+
+        if stats['failed_videos']:
+            print(f"\n❌ 失败的视频:")
+            for failed in stats['failed_videos']:
+                error_msg = failed.get('error', '下载失败')
+                print(f"   - {failed['title']} ({failed['date']}): {error_msg}")
 
         return stats
 
-    def cleanup_temp_files(self):
-        """清理临时文件"""
+    def download_videos_list(self, videos: List[VideoRecord], download_dir: str) -> Dict[str, Any]:
+        """
+        下载视频列表（兼容性方法）
+
+        Args:
+            videos: 要下载的视频列表
+            download_dir: 下载目录
+
+        Returns:
+            Dict: 下载统计信息
+        """
+        return self.download_videos_by_date(videos, download_dir, force=False)
+
+    def cleanup(self):
+        """清理临时目录"""
         try:
-            if hasattr(self, 'temp_dir') and os.path.exists(self.temp_dir):
+            if os.path.exists(self.temp_dir):
                 shutil.rmtree(self.temp_dir)
-                print("🧹 临时目录已清理")
+                print(f"🧹 临时目录已清理: {self.temp_dir}")
         except Exception as e:
             print(f"⚠️ 清理临时目录失败: {e}")
 
     def __del__(self):
-        """析构函数，清理临时文件"""
-        self.cleanup_temp_files()
+        """析构函数，自动清理临时目录"""
+        self.cleanup()
+
+    def merge_video_with_cover(self, video_path: str, audio_path: str, cover_path: str, output_path: str) -> bool:
+        """使用ffmpeg合并音视频并嵌入封面"""
+        try:
+            print(f"🔧 正在处理视频并嵌入封面...")
+
+            # 构建ffmpeg命令
+            cmd = ['ffmpeg', '-y']  # -y 覆盖现有文件
+
+            # 添加输入文件
+            if video_path:
+                cmd.extend(['-i', video_path])
+            if audio_path:
+                cmd.extend(['-i', audio_path])
+            if cover_path:
+                cmd.extend(['-i', cover_path])
+
+            # 设置映射和编码参数
+            if video_path and audio_path and cover_path:
+                # 视频 + 独立音频 + 封面
+                print("🎵 合并独立音视频流并嵌入封面")
+                cmd.extend([
+                    '-map', '0:v',  # 映射视频流
+                    '-map', '1:a',  # 映射音频流
+                    '-map', '2:v',  # 映射封面图片
+                    '-c:v:0', 'copy',  # 主视频流直接复制
+                    '-c:a', 'copy',  # 音频直接复制
+                    '-c:v:1', 'copy',  # 封面图片保持原格式
+                    '-disposition:v:1', 'attached_pic',  # 将封面设为附加图片
+                    '-movflags', '+faststart',
+                ])
+            elif video_path and cover_path:
+                # 视频 + 封面（需要确保音频不丢失）
+                print("🎬 嵌入封面到混合音视频流")
+                # 先检查视频文件是否包含音频流
+                has_audio = self.check_audio_in_file(video_path)
+                if has_audio:
+                    cmd.extend([
+                        '-map', '0:v',    # 映射视频流
+                        '-map', '0:a',    # 明确映射音频流
+                        '-map', '1:v',    # 映射封面图片
+                        '-c:v:0', 'copy', # 主视频流直接复制
+                        '-c:a', 'copy',   # 音频流直接复制
+                        '-c:v:1', 'copy', # 封面图片保持原格式
+                        '-disposition:v:1', 'attached_pic',
+                        '-movflags', '+faststart',
+                    ])
+                else:
+                    print("⚠️ 原视频文件不包含音频流")
+                    cmd.extend([
+                        '-map', '0:v',    # 映射视频流
+                        '-map', '1:v',    # 映射封面图片
+                        '-c:v:0', 'copy', # 主视频流直接复制
+                        '-c:v:1', 'copy', # 封面图片保持原格式
+                        '-disposition:v:1', 'attached_pic',
+                        '-movflags', '+faststart',
+                    ])
+            elif video_path and audio_path:
+                # 视频 + 独立音频（无封面）
+                print("🎵 合并独立音视频流")
+                cmd.extend([
+                    '-map', '0:v',  # 映射视频流
+                    '-map', '1:a',  # 映射音频流
+                    '-c:v', 'copy', # 视频直接复制
+                    '-c:a', 'copy', # 音频直接复制
+                    '-movflags', '+faststart',
+                ])
+            elif video_path:
+                # 仅视频文件
+                print("🎬 处理单一视频文件")
+                has_audio = self.check_audio_in_file(video_path)
+                if has_audio:
+                    cmd.extend([
+                        '-map', '0',      # 映射所有流
+                        '-c', 'copy',     # 所有流直接复制
+                        '-movflags', '+faststart',
+                    ])
+                else:
+                    cmd.extend([
+                        '-map', '0:v',    # 仅映射视频流
+                        '-c:v', 'copy',   # 视频流直接复制
+                        '-movflags', '+faststart',
+                    ])
+            else:
+                print("❌ 没有视频文件进行处理")
+                return False
+
+            # 添加输出文件
+            cmd.append(output_path)
+
+            print(f"🎯 执行命令: {' '.join(cmd)}")
+
+            # 执行ffmpeg命令
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8',
+                                  errors='ignore', timeout=self.config.FFMPEG_TIMEOUT)
+
+            if result.returncode == 0 and os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                print(f"✅ 视频处理完成: {output_path}")
+                print(f"📁 文件大小: {file_size / 1024 / 1024:.2f} MB")
+
+                # 验证音频流是否存在
+                self.verify_audio_in_output(output_path)
+                return True
+            else:
+                print(f"❌ 视频处理失败:")
+                print(f"返回码: {result.returncode}")
+                if result.stderr:
+                    print(f"错误信息: {result.stderr}")
+                if result.stdout:
+                    print(f"输出信息: {result.stdout}")
+
+                # 如果失败，尝试简化处理
+                if cover_path:
+                    print("🔄 尝试简化处理（不嵌入封面）...")
+                    return self.process_video_without_cover(video_path, audio_path, output_path)
+
+                return False
+
+        except Exception as e:
+            print(f"❌ 视频处理异常: {e}")
+            return False
+
+    def check_audio_in_file(self, file_path: str) -> bool:
+        """检查文件是否包含音频流"""
+        try:
+            cmd = ['ffprobe', '-v', 'quiet', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', file_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+            has_audio = result.returncode == 0 and result.stdout.strip()
+            if has_audio:
+                print(f"✅ 检测到音频流: {file_path}")
+            else:
+                print(f"⚠️ 未检测到音频流: {file_path}")
+            return bool(has_audio)
+        except Exception as e:
+            print(f"⚠️ 音频检测异常: {e}")
+            return False
+
+    def process_video_without_cover(self, video_path: str, audio_path: str, output_path: str) -> bool:
+        """处理视频但不嵌入封面"""
+        try:
+            cmd = ['ffmpeg', '-y']
+
+            if video_path:
+                cmd.extend(['-i', video_path])
+            if audio_path:
+                cmd.extend(['-i', audio_path])
+
+            if video_path and audio_path:
+                print("🎵 合并音视频流（无封面）")
+                cmd.extend([
+                    '-map', '0:v',
+                    '-map', '1:a',
+                    '-c:v', 'copy',
+                    '-c:a', 'copy',
+                    '-movflags', '+faststart',
+                ])
+            elif video_path:
+                print("🎬 处理视频文件（无封面）")
+                cmd.extend([
+                    '-map', '0',
+                    '-c', 'copy',
+                    '-movflags', '+faststart',
+                ])
+            else:
+                return False
+
+            cmd.append(output_path)
+
+            print(f"🎯 执行命令（无封面）: {' '.join(cmd)}")
+            result = subprocess.run(cmd, capture_output=True, text=True, encoding='utf-8',
+                                  errors='ignore', timeout=self.config.FFMPEG_TIMEOUT)
+
+            if result.returncode == 0 and os.path.exists(output_path):
+                file_size = os.path.getsize(output_path)
+                print(f"✅ 视频处理完成（无封面）: {output_path}")
+                print(f"📁 文件大小: {file_size / 1024 / 1024:.2f} MB")
+                self.verify_audio_in_output(output_path)
+                return True
+            else:
+                print(f"❌ 视频处理失败（无封面）:")
+                print(f"返回码: {result.returncode}")
+                if result.stderr:
+                    print(f"错误信息: {result.stderr}")
+                return False
+
+        except Exception as e:
+            print(f"❌ 视频处理异常（无封面）: {e}")
+            return False
+
+    def verify_audio_in_output(self, video_path: str) -> bool:
+        """验证输出视频是否包含音频流"""
+        try:
+            cmd = ['ffprobe', '-v', 'quiet', '-select_streams', 'a', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', video_path]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+
+            if result.returncode == 0 and result.stdout.strip():
+                print(f"✅ 音频流验证成功: {result.stdout.strip()}")
+                return True
+            else:
+                print(f"⚠️ 未检测到音频流，可能是静音视频")
+                return False
+        except Exception as e:
+            print(f"⚠️ 音频验证失败: {e}")
+            return False

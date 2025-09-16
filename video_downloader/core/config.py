@@ -35,7 +35,9 @@ class Config:
     # 下载配置
     MAX_RETRIES = 3
     MAX_WORKERS = 5
+    MAX_CONCURRENT_DOWNLOADS = 4  # 并行下载片段数量
     DOWNLOAD_DELAY = 2  # 下载间隔秒数
+    RETRY_DELAY = 1  # 重试延迟秒数
     FFMPEG_TIMEOUT = 600
 
     # FFmpeg 参数配置
@@ -45,6 +47,13 @@ class Config:
         'preset': 'fast',
         'crf': '23'
     }
+
+    # 音视频处理配置
+    AUDIO_STREAM_DETECTION = True  # 启用音频流检测
+    SEPARATE_AUDIO_DOWNLOAD = True  # 启用独立音频流下载
+    AUTO_MERGE_AUDIO_VIDEO = True  # 自动合并音视频
+    EMBED_COVER_IMAGE = True  # 嵌入封面图片
+    PREFER_HIGHEST_QUALITY = True  # 优先选择最高质量流
 
     # 视频处理配置
     TEMP_DIR_PREFIX = "video_download_"
@@ -93,9 +102,16 @@ class Config:
     PROXY_ENABLED = False
     PROXY_URL = "http://127.0.0.1:1080"
 
+    def get_proxy_config(self):
+        """获取代理配置"""
+        if self.PROXY_ENABLED and self.PROXY_URL:
+            return {
+                'http': self.PROXY_URL,
+                'https': self.PROXY_URL
+            }
+        return {}
+
     # 其他配置
-    MAX_CONCURRENT_DOWNLOADS = 3
-    RETRY_DELAY = 5  # 重试间隔秒数
     LOGGING_CONFIG = {
         'version': 1,
         'disable_existing_loggers': False,

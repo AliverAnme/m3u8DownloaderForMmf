@@ -19,17 +19,19 @@ class UserInterface:
         print("🎬 【视频解析与下载工具】")
         print("="*60)
         print("1. 执行API解析并写入数据库")
-        print("2. 下载操作（进入子菜单）")
-        print("3. 查看数据库所有视频信息")
-        print("4. 同步本地目录与数据库状态")
-        print("5. 退出程序")
+        print("2. 本地JSON文件解析（支持UID提取）")
+        print("3. Feed文件批量解析（从feed.json提取ID并请求详情）")
+        print("4. 下载操作（进入子菜单）")
+        print("5. 查看数据库所有视频信息")
+        print("6. 同步本地目录与数据库状态")
+        print("7. 退出程序")
         print("-"*60)
 
         while True:
-            choice = input("请输入操作编号（1-5）: ").strip()
-            if choice in ['1', '2', '3', '4', '5']:
+            choice = input("请输入操作编号（1-7）: ").strip()
+            if choice in ['1', '2', '3', '4', '5', '6', '7']:
                 return choice
-            print("❌ 无效输入，请输入1-5之间的数字")
+            print("❌ 无效输入，请输入1-7之间的数字")
 
     def show_download_menu(self) -> str:
         """显示下载子菜单并获取用户输入"""
@@ -380,4 +382,44 @@ class UserInterface:
                 print(f"❌ 文件不存在: {file_path}")
                 retry = input("是否重新输入？(y/n): ").strip().lower()
                 if retry not in ['y', 'yes', '是']:
+                    return ""  # 返回空字符串而不是None
+
+    def get_feed_file_path_input(self) -> str:
+        """获取Feed文件路径输入"""
+        print("\n💡 提示：请输入feed.json文件的路径")
+        print("   示例：feed.json 或 /path/to/feed.json")
+
+        while True:
+            file_path = input("请输入Feed文件路径: ").strip()
+            if not file_path:
+                print("❌ 文件路径不能为空")
+                continue
+
+            # 处理相对路径
+            if not os.path.isabs(file_path):
+                # 相对于项目根目录
+                current_dir = os.getcwd()
+                file_path = os.path.join(current_dir, file_path)
+
+            if os.path.exists(file_path):
+                return file_path
+            else:
+                print(f"❌ 文件不存在: {file_path}")
+                retry = input("是否重新输入？(y/n): ").strip().lower()
+                if retry not in ['y', 'yes', '是']:
                     return ""
+
+    def get_request_delay_input(self) -> float:
+        """获取请求延迟时间输入"""
+        while True:
+            try:
+                delay_input = input("请求间隔时间（默认2.0秒，范围0.5-10.0）: ").strip()
+                if not delay_input:
+                    return 2.0  # 默认值
+                delay = float(delay_input)
+                if 0.5 <= delay <= 10.0:
+                    return delay
+                else:
+                    print("❌ 请求间隔时间必须在0.5-10.0秒之间")
+            except ValueError:
+                print("❌ 请输入有效的数字")

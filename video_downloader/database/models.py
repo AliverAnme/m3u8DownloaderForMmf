@@ -16,6 +16,7 @@ class VideoRecord:
     cover: str                   # 封面图片链接
     url: Optional[str]           # m3u8音视频流链接（可为空）
     description: str             # 原始视频描述
+    uid: Optional[str] = None    # 视频UID（从JSON数据中提取）
     download: bool = False       # 下载状态（默认false，本地存在则为true）
     is_primer: bool = False      # 付费标识（url为空则true，否则false）
     created_at: Optional[datetime] = None
@@ -27,8 +28,13 @@ class VideoRecord:
         if self.updated_at is None:
             self.updated_at = datetime.now()
 
-        # 自动设置is_primer字段
-        self.is_primer = not bool(self.url)
+        # 如果有UID，则使用UID生成新的URL格式
+        if self.uid:
+            self.url = f"https://videodelivery.net/{self.uid}/manifest/video.m3u8"
+            self.is_primer = False  # 有UID的视频不是付费内容
+        else:
+            # 自动设置is_primer字段
+            self.is_primer = not bool(self.url)
 
     @classmethod
     def from_api_data(cls, item_data) -> 'VideoRecord':
@@ -71,12 +77,16 @@ class VideoRecord:
         # 提取video_date：从description中提取"连续4位数字"
         video_date = cls._extract_video_date(description)
 
+        # 提取uid：从item_data中提取uid字段
+        uid = item_data.get('uid', '') or cls._extract_uid(description)
+
         return cls(
             title=title,
             video_date=video_date,
             cover=cover,
             url=url,
-            description=description
+            description=description,
+            uid=uid
         )
 
     @staticmethod
@@ -148,6 +158,18 @@ class VideoRecord:
             return match.group()
         return ""
 
+    @staticmethod
+    def _extract_uid(description: str) -> str:
+        """从描述中提取UID"""
+        if not description:
+            return ""
+
+        # 查找"uid="及其后的内容
+        match = re.search(r'uid=([^&\s]+)', description)
+        if match:
+            return match.group(1)
+        return ""
+
     def get_unique_key(self) -> str:
         """获取唯一标识键（title + video_date）"""
         return f"{self.title}_{self.video_date}"
@@ -160,6 +182,7 @@ class VideoRecord:
             'cover': self.cover,
             'url': self.url,
             'description': self.description,
+            'uid': self.uid,
             'download': self.download,
             'is_primer': self.is_primer,
             'created_at': self.created_at.isoformat() if self.created_at else None,
