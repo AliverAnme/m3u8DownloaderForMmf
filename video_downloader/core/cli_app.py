@@ -5,7 +5,10 @@
 import os
 import importlib
 import time
-from typing import List
+import json
+import traceback
+from datetime import datetime
+from typing import List, Dict, Any, Optional
 
 from ..api.client import APIClient
 from ..api.feed_parser import FeedParser
@@ -15,6 +18,7 @@ from ..database.models import VideoRecord
 from ..download.manager import DownloadManager
 from ..cloud.cloud_manager import CloudStorageManager
 from ..core.config import Config
+from ..scheduler.memefans_scheduler import MemefansScheduler  # 新增导入
 
 
 class CLIVideoDownloaderApp:
@@ -1133,12 +1137,16 @@ class CLIVideoDownloaderApp:
             traceback.print_exc()
 
     def handle_memefans_auto_scheduler(self):
-        """处理Memefans API定时自动调度解析 - 每5分钟重复一次，使用默认参数"""
+        """处理Memefans API定时自动调度解析 - 每5分钟重复一次，每轮都重新尝试Feed API然后降级到Posts API"""
         try:
             self.ui.show_info("⏰ 启动Memefans API定时自动调度解析功能...")
 
-            print(f"\n🔧 自动调度配置：")
+            print(f"\n🔧 自动调度配置（新策略）：")
             print(f"   执行间隔: 5 分钟（固定）")
+            print(f"   策略: 每轮重新开始")
+            print(f"   阶段1: Feed API (https://api.memefans.ai/v2/feed) - 最多重试3次")
+            print(f"   阶段2: Posts API (https://api.memefans.ai/v2/posts/) - Feed API失败后降级，最多重试3次")
+            print(f"   下一轮: 重新从Feed API开始")
             print(f"   API页码: 1（默认）")
             print(f"   每页数据量: 10（默认）")
             print(f"   自动下载: ✅ 启用（跳过已存在文件）")
@@ -1148,8 +1156,16 @@ class CLIVideoDownloaderApp:
             if not self.ui.confirm_action("确认开始执行Memefans API定时调度？（按Ctrl+C停止）"):
                 return
 
+            # 初始化新的Memefans调度器
+            memefans_scheduler = MemefansScheduler(
+                self.db_manager,
+                self.download_manager,
+                self.cloud_manager
+            )
+
             self.ui.show_info("🚀 定时调度已启动，每5分钟执行一次...")
             print("💡 提示：按 Ctrl+C 可以随时停止调度")
+            print("🔄 每轮策略：Feed API (3次重试) → Posts API (3次重试) → 下轮重新开始")
 
             cycle_count = 0
 
@@ -1162,12 +1178,18 @@ class CLIVideoDownloaderApp:
                     print(f"🔄 第 {cycle_count} 次调度执行 - {current_time}")
                     print(f"{'='*60}")
 
-                    # 执行自动化流程
-                    new_downloads = self._execute_automated_memefans_flow()
+                    # 执行新的每轮重新开始的调度策略
+                    success = memefans_scheduler.execute_scheduled_task()
 
-                    # 显示本轮执行结果
+                    # 显示本轮执行结果和API状态
+                    status_info = memefans_scheduler.get_status_info()
                     print(f"\n📊 第 {cycle_count} 轮执行完成:")
-                    print(f"   新下载视频: {len(new_downloads)} 个")
+                    print(f"   执行结果: {'✅ 成功' if success else '❌ 失败'}")
+                    print(f"   执行策略: {status_info['strategy']}")
+                    print(f"   最后使用API: {status_info['last_api_used']}")
+                    print(f"   总执行次数: {status_info['total_executions']}")
+                    print(f"   Feed API调用: {status_info['feed_api_executions']} 次")
+                    print(f"   Posts API调用: {status_info['posts_api_executions']} 次")
                     print(f"   执行时间: {current_time}")
 
                     # 等待5分钟（300秒）
@@ -1175,6 +1197,14 @@ class CLIVideoDownloaderApp:
 
                 except KeyboardInterrupt:
                     print(f"\n\n⏹️ 用户手动停止调度（共执行 {cycle_count} 轮）")
+
+                    # 显示最终统计
+                    final_status = memefans_scheduler.get_status_info()
+                    print(f"\n📊 调度统计总结:")
+                    print(f"   总执行次数: {final_status['total_executions']}")
+                    print(f"   Feed API调用: {final_status['feed_api_executions']} 次")
+                    print(f"   Posts API调用: {final_status['posts_api_executions']} 次")
+                    print(f"   执行策略: 每轮重新开始降级")
                     break
                 except Exception as e:
                     print(f"\n❌ 第 {cycle_count} 轮执行异常: {e}")
