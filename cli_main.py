@@ -21,8 +21,34 @@ def clear_module_cache():
     for module_name in modules_to_remove:
         del sys.modules[module_name]
 
+    # 强制清除__pycache__
+    import shutil
+    pycache_dirs = [
+        'video_downloader/__pycache__',
+        'video_downloader/api/__pycache__',
+        'video_downloader/core/__pycache__',
+        'video_downloader/database/__pycache__',
+        'video_downloader/download/__pycache__',
+        'video_downloader/ui/__pycache__',
+        'video_downloader/utils/__pycache__',
+        'video_downloader/cloud/__pycache__'
+    ]
+
+    for pycache_dir in pycache_dirs:
+        if os.path.exists(pycache_dir):
+            try:
+                shutil.rmtree(pycache_dir)
+                print(f"🗑️ 清除缓存目录: {pycache_dir}")
+            except Exception as e:
+                print(f"⚠️ 清除缓存失败 {pycache_dir}: {e}")
+
 # 清除缓存并重新导入
 clear_module_cache()
+
+# 强制重新导入
+import importlib
+if 'video_downloader.api.memefans_client' in sys.modules:
+    del sys.modules['video_downloader.api.memefans_client']
 
 from video_downloader.core.cli_app import CLIVideoDownloaderApp
 

@@ -19,20 +19,22 @@ class UserInterface:
         print("🎬 【视频解析与下载工具】")
         print("="*60)
         print("1. 执行API解析并写入数据库")
-        print("2. 本地JSON文件解析（支持UID提取）")
-        print("3. Feed文件批量解析（从feed.json提取ID并请求详情）")
-        print("4. 下载操作（进入子菜单）")
-        print("5. 查看数据库所有视频信息")
-        print("6. 同步本地目录与数据库状态")
-        print("7. 坚果云上传（进入子菜单）")
-        print("8. 退出程序")
+        print("2. Memefans API解析并自动下载上传")
+        print("2a. Memefans API定时自动调度（每5分钟）")
+        print("3. 本地JSON文件解析（支持UID提取）")
+        print("4. Feed文件批量解析（从feed.json提取ID并请求详情）")
+        print("5. 下载操作（进入子菜单）")
+        print("6. 查看数据库所有视频信息")
+        print("7. 同步本地目录与数据库状态")
+        print("8. 坚果云上传（进入子菜单）")
+        print("9. 退出程序")
         print("-"*60)
 
         while True:
-            choice = input("请输入操作编号（1-8）: ").strip()
-            if choice in ['1', '2', '3', '4', '5', '6', '7', '8']:
+            choice = input("请输入操作编号（1-9, 2a）: ").strip()
+            if choice in ['1', '2', '2a', '3', '4', '5', '6', '7', '8', '9']:
                 return choice
-            print("❌ 无效输入，请输入1-8之间的数字")
+            print("❌ 无效输入，请输入正确的选项编号")
 
     def show_download_menu(self) -> str:
         """显示下载子菜单并获取用户输入"""
@@ -479,3 +481,41 @@ class UserInterface:
             if password:
                 return password
             print("❌ 应用密码不能为空")
+
+    def get_memefans_api_params(self) -> tuple:
+        """获取Memefans API请求参数"""
+        print("\n🔧 Memefans API参数设置")
+        print("-" * 40)
+
+        # 获取页码
+        while True:
+            try:
+                page_input = input("请输入页码（默认1，范围1-100）: ").strip()
+                if not page_input:
+                    page = 1
+                    break
+                page = int(page_input)
+                if 1 <= page <= 100:
+                    break
+                else:
+                    print("❌ 页码必须在1-100之间")
+            except ValueError:
+                print("❌ 请输入有效的数字")
+
+        # 获取每页数据量
+        while True:
+            try:
+                size_input = input("请输入每页数据量（默认10，范围1-50）: ").strip()
+                if not size_input:
+                    size = 10
+                    break
+                size = int(size_input)
+                if 1 <= size <= 50:
+                    break
+                else:
+                    print("❌ 每页数据量必须在1-50之间")
+            except ValueError:
+                print("❌ 请输入有效的数字")
+
+        print(f"✅ 参数设置完成：页码={page}, 每页数据量={size}")
+        return page, size
