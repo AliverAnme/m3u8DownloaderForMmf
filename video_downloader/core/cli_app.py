@@ -8,9 +8,11 @@ import time
 from typing import List
 
 from ..api.client import APIClient
+from ..api.feed_parser import FeedParser
 from ..database.manager import DatabaseManager
 from ..database.models import VideoRecord
 from ..download.manager import DownloadManager
+from ..cloud.cloud_manager import CloudStorageManager
 from ..core.config import Config
 
 
@@ -34,8 +36,10 @@ class CLIVideoDownloaderApp:
 
         self.ui = UserInterface()
         self.api_client = APIClient()
+        self.feed_parser = FeedParser()
         self.db_manager = DatabaseManager(self.config.DATABASE_FILE)
         self.download_manager = DownloadManager()
+        self.cloud_manager = CloudStorageManager()
 
         # 确保下载目录存在
         os.makedirs(self.config.DEFAULT_DOWNLOADS_DIR, exist_ok=True)
@@ -54,9 +58,9 @@ class CLIVideoDownloaderApp:
                 if choice == '1':
                     self.handle_api_parsing()
                 elif choice == '2':
-                    self.handle_local_json_parsing()  # 本地JSON解析功能
+                    self.handle_local_json_parsing()
                 elif choice == '3':
-                    self.handle_feed_parsing()  # feed解析功能
+                    self.handle_feed_parsing()
                 elif choice == '4':
                     self.handle_download_menu()
                 elif choice == '5':
@@ -64,6 +68,8 @@ class CLIVideoDownloaderApp:
                 elif choice == '6':
                     self.handle_sync_directory()
                 elif choice == '7':
+                    self.handle_cloud_upload_menu()
+                elif choice == '8':
                     break
 
                 self.ui.wait_for_enter()
@@ -88,7 +94,7 @@ class CLIVideoDownloaderApp:
             self.ui.display_statistics(stats)
 
             # 检查ffmpeg
-            if self.download_manager.check_ffmpeg():
+            if hasattr(self.download_manager, 'check_ffmpeg') and self.download_manager.check_ffmpeg():
                 self.ui.show_success("ffmpeg 检查通过")
             else:
                 self.ui.show_warning("ffmpeg 未找到，下载功能可能无法正常使用")
@@ -221,7 +227,7 @@ class CLIVideoDownloaderApp:
                 for i, record in enumerate(video_records[:3], 1):
                     print(f"{i}. {record.title}")
                     print(f"   描述: {record.description[:50]}...")
-                    print(f"   URL: {record.video_url}")
+                    print(f"   URL: {record.url}")
                     print()
 
         except Exception as e:
@@ -685,7 +691,8 @@ class CLIVideoDownloaderApp:
         """清理资源"""
         try:
             # 清理下载管理器的临时文件
-            self.download_manager.cleanup_temp_files()
+            if hasattr(self.download_manager, 'cleanup_temp_files'):
+                self.download_manager.cleanup_temp_files()
         except Exception as e:
             print(f"清理资源时发生错误: {e}")
 
@@ -753,53 +760,258 @@ class CLIVideoDownloaderApp:
             traceback.print_exc()
 
     def handle_feed_parsing(self):
-        """处理feed文件批量解析操作"""
+        """处理feed文件解析操作"""
         try:
-            self.ui.show_info("📋 启动Feed文件批量解析功能...")
+            self.ui.show_info("📋 启动Feed文件解析功能...")
 
-            # 获取feed文件路径
-            file_path = self.ui.get_feed_file_path_input()
-            if not file_path:
-                self.ui.show_warning("❌ 未指定有效的Feed文件路径")
+            # 获取feed文件路径，默认使用项目根目录的feed.json
+            default_feed_path = os.path.join(os.path.dirname(self.config.BASE_DIR), "feed.json")
+            file_path = self.ui.get_feed_file_path_input(default_feed_path)
+
+            if not file_path or not os.path.exists(file_path):
+                self.ui.show_warning("❌ Feed文件不存在或路径无效")
                 return
 
-            # 获取请求设置
-            request_delay = self.ui.get_request_delay_input()
+            # 获取请求参数
+            wait_time = self.ui.get_request_delay_input(default=1.0)
+            max_retries = self.ui.get_retry_count_input(default=3)
 
             # 确认操作
-            if not self.ui.confirm_action(f"确认开始Feed文件批量解析？\n文件: {file_path}\n请求间隔: {request_delay}秒"):
+            if not self.ui.confirm_action(
+                f"确认开始Feed文件解析？\n"
+                f"文件: {file_path}\n"
+                f"请求间隔: {wait_time}秒\n"
+                f"最大重试: {max_retries}次"
+            ):
                 return
 
-            # 创建feed解析器
-            from ..api.feed_parser import FeedParser
-            feed_parser = FeedParser()
+            self.ui.show_info("🚀 开始处理Feed文件...")
 
-            # 设置请求延迟
-            feed_parser.request_delay = request_delay
-
-            self.ui.show_info("🚀 开始批量处理Feed文件...")
-
-            # 执行批量处理
-            video_records = feed_parser.batch_process_feed(file_path)
+            # 执行feed解析
+            video_records = self.feed_parser.process_feed_ids(
+                file_path,
+                wait_time=wait_time,
+                max_retries=max_retries
+            )
 
             if not video_records:
-                self.ui.show_warning("❌ Feed文件批量解析未获取到任何有效视频数据")
+                self.ui.show_warning("❌ Feed文件解析未获取到任何有效视频数据")
                 return
 
-            # 保存缓存文件
-            cache_file_path = os.path.join(self.config.DATA_DIR, f"feed_cache_{int(time.time())}.json")
-            feed_parser.save_cache_file(video_records, cache_file_path)
-
-            # 处理解析结果
-            self.ui.show_success(f"✅ Feed文件批量解析成功，获得 {len(video_records)} 条视频记录")
+            # 显示解析结果
+            self.ui.show_success(f"✅ Feed文件解析成功，获得 {len(video_records)} 条视频记录")
 
             # 询问是否写入数据库
             if self.ui.confirm_action("是否将解析结果写入数据库？"):
                 self._process_video_records(video_records)
             else:
+                # 保存到缓存文件
+                cache_file_path = os.path.join(
+                    self.config.DATA_DIR,
+                    f"feed_cache_{int(time.time())}.json"
+                )
+                self._save_feed_cache(video_records, cache_file_path)
                 self.ui.show_info(f"解析结果已保存到缓存文件: {cache_file_path}")
 
         except Exception as e:
-            self.ui.show_error(f"❌ Feed文件批量解析失败: {e}")
+            self.ui.show_error(f"❌ Feed文件解析失败: {e}")
             import traceback
             traceback.print_exc()
+
+    def _save_feed_cache(self, video_records: List[VideoRecord], cache_file_path: str):
+        """保存feed解析结果到缓存文件"""
+        try:
+            cache_data = {
+                'timestamp': int(time.time()),
+                'count': len(video_records),
+                'records': []
+            }
+
+            for record in video_records:
+                cache_data['records'].append({
+                    'title': record.title,
+                    'video_date': record.video_date,
+                    'cover': record.cover,
+                    'url': record.url,
+                    'description': record.description,
+                    'uid': record.uid if hasattr(record, 'uid') else '',
+                    'is_primer': record.is_primer
+                })
+
+            import json
+            os.makedirs(os.path.dirname(cache_file_path), exist_ok=True)
+            with open(cache_file_path, 'w', encoding='utf-8') as f:
+                json.dump(cache_data, f, ensure_ascii=False, indent=2)
+
+        except Exception as e:
+            print(f"❌ 保存缓存文件失败: {e}")
+
+    def handle_cloud_upload_menu(self):
+        """处理坚果云上传菜单"""
+        while True:
+            choice = self.ui.show_cloud_upload_menu()
+
+            if choice == '1':
+                self.handle_setup_jianguoyun()
+            elif choice == '2':
+                self.handle_upload_single_video()
+            elif choice == '3':
+                self.handle_upload_all_videos()
+            elif choice == '4':
+                self.handle_upload_by_date()
+            elif choice == '5':
+                self.handle_view_upload_status()
+            elif choice == '6':
+                break
+
+            if choice != '6':
+                self.ui.wait_for_enter()
+
+    def handle_setup_jianguoyun(self):
+        """设置坚果云连接"""
+        try:
+            self.ui.show_info("🔧 设置坚果云WebDAV连接...")
+
+            # 获取用户输入
+            username = self.ui.get_jianguoyun_username()
+            password = self.ui.get_jianguoyun_password()
+
+            if not username or not password:
+                self.ui.show_warning("❌ 用户名或密码不能为空")
+                return
+
+            # 设置连接
+            if self.cloud_manager.setup_jianguoyun(username, password):
+                self.ui.show_success("✅ 坚果云连接设置成功")
+            else:
+                self.ui.show_error("❌ 坚果云连接设置失败")
+
+        except Exception as e:
+            self.ui.show_error(f"❌ 设置坚果云连接异常: {e}")
+
+    def handle_upload_single_video(self):
+        """上传单个视频"""
+        try:
+            # 获取所有视频列表
+            videos = self.db_manager.get_all_videos()
+
+            if not videos:
+                self.ui.show_info("数据库中暂无视频记录")
+                return
+
+            # 显示视频列表
+            self.ui.display_video_list(videos, "所有视频列表")
+
+            # 获取用户选择
+            selected_indices = self.ui.get_index_selection(videos)
+
+            if not selected_indices:
+                self.ui.show_info("未选择任何视频")
+                return
+
+            # 处理选中的视频
+            for idx in selected_indices:
+                if 1 <= idx <= len(videos):
+                    video = videos[idx-1]
+                    self._upload_video_file(video)
+
+        except Exception as e:
+            self.ui.show_error(f"❌ 上传单个视频失败: {e}")
+
+    def handle_upload_all_videos(self):
+        """上传所有本地视频"""
+        try:
+            # 扫描并上传下载目录中的所有视频
+            upload_results = self.cloud_manager.scan_and_upload_downloads()
+
+            if not upload_results:
+                self.ui.show_info("下载目录中没有找到视频文件")
+                return
+
+            # 显示上传结果
+            success_count = sum(1 for success in upload_results.values() if success)
+            total_count = len(upload_results)
+
+            self.ui.show_success(f"✅ 批量上传完成: {success_count}/{total_count} 成功")
+
+            # 显示详细结果
+            print("\n📋 上传结果详情:")
+            for file_path, success in upload_results.items():
+                file_name = os.path.basename(file_path)
+                status = "✅ 成功" if success else "❌ 失败"
+                print(f"  {status} {file_name}")
+
+        except Exception as e:
+            self.ui.show_error(f"❌ 批量上传视频失败: {e}")
+
+    def handle_upload_by_date(self):
+        """按日期上传视频"""
+        try:
+            video_date = self.ui.get_video_date_input("请输入要上传的视频日期")
+
+            # 获取该日期的已下载视频
+            videos = self.db_manager.get_videos_by_date(video_date)
+            downloaded_videos = [v for v in videos if v.download and not v.is_primer]
+
+            if not downloaded_videos:
+                self.ui.show_info(f"日期 {video_date} 没有已下载的免费视频")
+                return
+
+            self.ui.display_video_list(downloaded_videos, f"日期 {video_date} 的已下载视频")
+
+            if not self.ui.confirm_action(f"确认上传日期 {video_date} 的 {len(downloaded_videos)} 个视频？"):
+                return
+
+            # 执行上传
+            success_count = 0
+            for video in downloaded_videos:
+                if self._upload_video_file(video):
+                    success_count += 1
+
+            self.ui.show_success(f"✅ 按日期上传完成: {success_count}/{len(downloaded_videos)} 成功")
+
+        except Exception as e:
+            self.ui.show_error(f"❌ 按日期上传视频失败: {e}")
+
+    def handle_view_upload_status(self):
+        """查看上传状态"""
+        try:
+            status = self.cloud_manager.get_upload_status()
+
+            print("\n☁️ 坚果云上传状态:")
+            print(f"  连接状态: {'✅ 已连接' if status['jianguoyun_enabled'] else '❌ 未连接'}")
+            print(f"  配置状态: {'✅ 已配置' if status['config_loaded'] else '❌ 未配置'}")
+
+            if status['jianguoyun_enabled']:
+                self.ui.show_info("坚果云功能已启用")
+            else:
+                self.ui.show_warning("坚果云功能未启用，请先设置连接")
+
+        except Exception as e:
+            self.ui.show_error(f"❌ 查看上传状态失败: {e}")
+
+    def _upload_video_file(self, video: VideoRecord) -> bool:
+        """上传单个视频文件的通用方法"""
+        try:
+            # 构建本地文件路径
+            file_name = f"{video.title}_{video.video_date}.mp4"
+            local_path = os.path.join(self.config.DEFAULT_DOWNLOADS_DIR, file_name)
+
+            if not os.path.exists(local_path):
+                print(f"❌ 本地文件不存在: {local_path}")
+                return False
+
+            # 上传到坚果云
+            remote_subdir = f"{video.video_date}"  # 按日期分组
+            success = self.cloud_manager.upload_video_to_jianguoyun(local_path, remote_subdir)
+
+            if success:
+                print(f"✅ 上传成功: {video.title}")
+            else:
+                print(f"❌ 上传失败: {video.title}")
+
+            return success
+
+        except Exception as e:
+            print(f"❌ 上传视频异常 {video.title}: {e}")
+            return False

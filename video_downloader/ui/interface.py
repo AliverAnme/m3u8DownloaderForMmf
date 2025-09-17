@@ -24,14 +24,15 @@ class UserInterface:
         print("4. 下载操作（进入子菜单）")
         print("5. 查看数据库所有视频信息")
         print("6. 同步本地目录与数据库状态")
-        print("7. 退出程序")
+        print("7. 坚果云上传（进入子菜单）")
+        print("8. 退出程序")
         print("-"*60)
 
         while True:
-            choice = input("请输入操作编号（1-7）: ").strip()
-            if choice in ['1', '2', '3', '4', '5', '6', '7']:
+            choice = input("请输入操作编号（1-8）: ").strip()
+            if choice in ['1', '2', '3', '4', '5', '6', '7', '8']:
                 return choice
-            print("❌ 无效输入，请输入1-7之间的数字")
+            print("❌ 无效输入，请输入1-8之间的数字")
 
     def show_download_menu(self) -> str:
         """显示下载子菜单并获取用户输入"""
@@ -86,6 +87,25 @@ class UserInterface:
             if choice in ['1', '2', '3', '4']:
                 return choice
             print("❌ 无效输入，请输入1-4之间的数字")
+
+    def show_cloud_upload_menu(self) -> str:
+        """显示坚果云上传菜单并获取用户输入"""
+        print("\n" + "="*60)
+        print("☁️ 【坚果云上传子菜单】")
+        print("="*60)
+        print("1. 设置坚果云连接")
+        print("2. 上传单个视频")
+        print("3. 批量上传所有视频")
+        print("4. 按日期上传视频")
+        print("5. 查看上传状态")
+        print("6. 返回主菜单")
+        print("-"*60)
+
+        while True:
+            choice = input("请输入操作编号（1-6）: ").strip()
+            if choice in ['1', '2', '3', '4', '5', '6']:
+                return choice
+            print("❌ 无效输入，请输入1-6之间的数字")
 
     def get_video_date_input(self, prompt: str = "请输入视频日期（4位数字，如0714）") -> str:
         """获取视频日期输入"""
@@ -188,6 +208,7 @@ class UserInterface:
         print("🎬 视频解析与下载工具")
         print("📝 支持API解析、数据库管理、视频下载")
         print("🔧 基于ffmpeg的音视频合并和封面嵌入")
+        print("☁️ 支持坚果云WebDAV上传")
         print("="*60)
 
     def show_exit_message(self):
@@ -300,13 +321,13 @@ class UserInterface:
             except ValueError:
                 print("❌ 请输入有效的数字")
 
-    def get_retry_count_input(self) -> int:
+    def get_retry_count_input(self, default: int = 3) -> int:
         """获取重试次数输入"""
         while True:
             try:
-                retry_input = input("请输入最大重试次数（默认3次，范围1-10）: ").strip()
+                retry_input = input(f"请输入最大重试次数（默认{default}次，范围1-10）: ").strip()
                 if not retry_input:
-                    return 3  # 默认值
+                    return default
                 retry_count = int(retry_input)
                 if 1 <= retry_count <= 10:
                     return retry_count
@@ -321,7 +342,7 @@ class UserInterface:
             try:
                 delay_input = input("请输入重试延迟时间（默认1.0秒，范围0.1-10.0）: ").strip()
                 if not delay_input:
-                    return 1.0  # 默认值
+                    return 1.0
                 delay = float(delay_input)
                 if 0.1 <= delay <= 10.0:
                     return delay
@@ -350,7 +371,7 @@ class UserInterface:
             try:
                 delay_input = input("请输入页面间延迟时间（默认0.5秒，范围0.1-5.0）: ").strip()
                 if not delay_input:
-                    return 0.5  # 默认值
+                    return 0.5
                 delay = float(delay_input)
                 if 0.1 <= delay <= 5.0:
                     return delay
@@ -382,16 +403,25 @@ class UserInterface:
                 print(f"❌ 文件不存在: {file_path}")
                 retry = input("是否重新输入？(y/n): ").strip().lower()
                 if retry not in ['y', 'yes', '是']:
-                    return ""  # 返回空字符串而不是None
+                    return ""
 
-    def get_feed_file_path_input(self) -> str:
+    def get_feed_file_path_input(self, default_path: str = None) -> str:
         """获取Feed文件路径输入"""
-        print("\n💡 提示：请输入feed.json文件的路径")
-        print("   示例：feed.json 或 /path/to/feed.json")
+        if default_path:
+            print(f"\n💡 提示：请输入feed.json文件的路径（默认: {default_path}）")
+            print("   直接回车使用默认路径，或输入新路径")
+        else:
+            print("\n💡 提示：请输入feed.json文件的路径")
+            print("   示例：feed.json 或 /path/to/feed.json")
 
         while True:
             file_path = input("请输入Feed文件路径: ").strip()
-            if not file_path:
+
+            # 如果用户直接回车且有默认路径，使用默认路径
+            if not file_path and default_path:
+                file_path = default_path
+                print(f"使用默认路径: {file_path}")
+            elif not file_path:
                 print("❌ 文件路径不能为空")
                 continue
 
@@ -409,13 +439,13 @@ class UserInterface:
                 if retry not in ['y', 'yes', '是']:
                     return ""
 
-    def get_request_delay_input(self) -> float:
+    def get_request_delay_input(self, default: float = 2.0) -> float:
         """获取请求延迟时间输入"""
         while True:
             try:
-                delay_input = input("请求间隔时间（默认2.0秒，范围0.5-10.0）: ").strip()
+                delay_input = input(f"请求间隔时间（默认{default}秒，范围0.5-10.0）: ").strip()
                 if not delay_input:
-                    return 2.0  # 默认值
+                    return default
                 delay = float(delay_input)
                 if 0.5 <= delay <= 10.0:
                     return delay
@@ -423,3 +453,29 @@ class UserInterface:
                     print("❌ 请求间隔时间必须在0.5-10.0秒之间")
             except ValueError:
                 print("❌ 请输入有效的数字")
+
+    def get_jianguoyun_username(self) -> str:
+        """获取坚果云用户名输入"""
+        print("\n💡 提示：请输入您的坚果云用户名（通常是邮箱地址）")
+        while True:
+            username = input("坚果云用户名: ").strip()
+            if username:
+                return username
+            print("❌ 用户名不能为空")
+
+    def get_jianguoyun_password(self) -> str:
+        """获取坚果云应用密码输入"""
+        print("\n💡 提示：请输入坚果云应用密码（非登录密码）")
+        print("   如何获取应用密码：")
+        print("   1. 登录坚果云网页版")
+        print("   2. 进入账户信息 -> 安全选项")
+        print("   3. 添加应用密码，输入应用名称")
+        print("   4. 复制生成的应用密码")
+
+        while True:
+            # 使用普通输入，避免getpass在Windows下可能出现的问题
+            password = input("应用密码: ").strip()
+
+            if password:
+                return password
+            print("❌ 应用密码不能为空")
