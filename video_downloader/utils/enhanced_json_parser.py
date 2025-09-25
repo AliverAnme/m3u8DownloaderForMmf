@@ -736,3 +736,6 @@ class EnhancedJSONParser:
                     return resolution
 
         return None
+
+    def get_parse_stats(self):
+        return self.parse_stats
