@@ -5,7 +5,7 @@ class Config:
     # API配置
     API_BASE_URL = "https://api.memefans.ai/v2/posts/"
     DEFAULT_AUTHOR_ID = "BhhLJPlVvjU"
-    DEFAULT_PAGE_SIZE = 50
+    DEFAULT_PAGE_SIZE = 20
     API_TIMEOUT = 30
 
     # 请求头配置
@@ -100,14 +100,42 @@ class Config:
 
     # 代理配置
     PROXY_ENABLED = False
-    PROXY_URL = "http://127.0.0.1:1080"
+    PROXY_HTTP = "http://127.0.0.1:7890"
+    PROXY_HTTPS = "http://127.0.0.1:7890"
 
-    def get_proxy_config(self):
+    # 坚果云WebDAV配置
+    JIANGUOYUN_CONFIG = {
+        'enabled': False,
+        'username': '',  # 坚果云用户名（邮箱）
+        'password': '',  # 坚果云应用密码
+        'base_url': 'https://dav.jianguoyun.com/dav/',
+        'remote_dir': '/视频备份/',  # 远程存储目录
+        'auto_upload': False,  # 是否自动上传
+        'upload_after_download': False,  # 下载后自动上传
+        'overwrite_existing': False,  # 是否覆盖已存在文件
+        'delete_local_after_upload': False,  # 上传后删除本地文件
+        'max_file_size_mb': 1024,  # 最大上传文件大小(MB)
+        'chunk_size': 8192,  # 上传块大小
+        'timeout': 300,  # 上传超时时间(秒)
+    }
+
+    # Feed JSON处理配置
+    FEED_CONFIG = {
+        'enabled': True,
+        'feed_file_path': 'feed.json',  # feed文件路径
+        'api_wait_time': 1.0,  # API请求间隔时间(秒)
+        'max_retries': 3,  # 最大重试次数
+        'cache_ids': True,  # 是否缓存ID列表
+        'batch_size': 10,  # 批量处理大小
+    }
+
+    @classmethod
+    def get_proxy_config(cls):
         """获取代理配置"""
-        if self.PROXY_ENABLED and self.PROXY_URL:
+        if cls.PROXY_ENABLED:
             return {
-                'http': self.PROXY_URL,
-                'https': self.PROXY_URL
+                'http': cls.PROXY_HTTP,
+                'https': cls.PROXY_HTTPS
             }
         return {}
 

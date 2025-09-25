@@ -346,7 +346,7 @@ class EnhancedJSONParser:
         result = {'items': [], '_source': 'text_extraction'}
 
         # 查找JSON对象
-        json_objects = re.findall(r'\{[^{}]*\}', text)
+        json_objects = re.findall(r'\{[^{}]*}', text)
         for obj_str in json_objects:
             try:
                 obj = json.loads(obj_str)
@@ -356,7 +356,7 @@ class EnhancedJSONParser:
                 continue
 
         # 查找JSON数组
-        json_arrays = re.findall(r'\[[^\[\]]*\]', text)
+        json_arrays = re.findall(r'\[[^\[\]]*]', text)
         for arr_str in json_arrays:
             try:
                 arr = json.loads(arr_str)
@@ -399,14 +399,12 @@ class EnhancedJSONParser:
         """解析对象格式的item"""
         result = {'_source': 'object'}
 
-        # 尝试获取对象属性
+        # 获取对象属性
         if hasattr(obj, '__dict__'):
-            for key, value in obj.__dict__.items():
-                if not key.startswith('_'):  # 忽略私有属性
-                    result[key] = value
+            result.update(obj.__dict__)
 
-        # 尝试常见属性
-        common_attrs = ['id', 'title', 'description', 'url', 'cover']
+        # 尝试获取常见属性
+        common_attrs = ['id', 'title', 'description', 'url', 'cover', 'author', 'date']
         for attr in common_attrs:
             if hasattr(obj, attr):
                 result[attr] = getattr(obj, attr)
@@ -418,70 +416,326 @@ class EnhancedJSONParser:
         if not item:
             return None
 
-        # 如果列表只有一个元素，递归解析
+        result = {
+            '_source': 'list',
+            '_index': index,
+            'items': item
+        }
+
+        # 如果列表只有一个元素，尝试解析它
         if len(item) == 1:
             return self._parse_single_item(item[0], index)
 
-        # 多个元素的情况，尝试组合
-        result = {'_source': 'list', '_index': index}
-
-        for i, sub_item in enumerate(item):
-            if isinstance(sub_item, dict):
-                result.update(sub_item)
-            elif isinstance(sub_item, str) and len(sub_item) > 5:
-                result[f'text_{i}'] = sub_item
-
-        return result if len(result) > 2 else None
+        return result
 
     def _parse_other_item(self, item: Any, index: int) -> Optional[Dict[str, Any]]:
         """解析其他格式的item"""
         result = {
             '_source': 'other',
+            '_index': index,
             '_type': type(item).__name__,
-            '_index': index
+            'value': str(item)
         }
 
-        # 尝试转换为字符串
-        try:
-            str_repr = str(item)
-            if len(str_repr) > 10:
-                result['string_representation'] = str_repr
-
-                # 从字符串表示中提取信息
-                self._extract_common_fields(str_repr, result)
-        except Exception as e:
-            result['_error'] = str(e)
-
-        return result if len(result) > 3 else None
+        return result
 
     def _parse_unknown_type(self, data: Any) -> Dict[str, Any]:
         """解析未知类型的数据"""
+        result = {'_source': 'unknown_type', '_type': type(data).__name__}
+
         # 尝试转换为字符串并解析
         try:
             str_data = str(data)
-            return self._parse_string_data(str_data)
+            if str_data:
+                result.update(self._parse_string_data(str_data))
         except Exception:
-            return {
-                'items': [],
-                '_source': 'unknown_type',
-                '_type': type(data).__name__,
-                '_error': 'Unable to parse unknown data type'
-            }
+            result['error'] = 'Failed to convert to string'
+
+        return result
 
     def _print_parse_stats(self):
         """输出解析统计信息"""
         stats = self.parse_stats
-        total = stats['total_items']
+        print(f"📊 解析统计 - 总计: {stats['total_items']}, "
+              f"成功: {stats['successful_parses']}, "
+              f"对象字符串: {stats['string_object_parses']}, "
+              f"JSON字符串: {stats['json_string_parses']}, "
+              f"回退解析: {stats['fallback_parses']}, "
+              f"失败: {stats['failed_parses']}")
 
-        if total > 0:
-            print(f"\n📊 解析统计:")
-            print(f"   总项目数: {total}")
-            print(f"   成功解析: {stats['successful_parses']} ({stats['successful_parses']/total*100:.1f}%)")
-            print(f"   字符串对象: {stats['string_object_parses']}")
-            print(f"   JSON字符串: {stats['json_string_parses']}")
-            print(f"   降级解析: {stats['fallback_parses']}")
-            print(f"   解析失败: {stats['failed_parses']} ({stats['failed_parses']/total*100:.1f}%)")
+    def parse_json_string(self, json_str: str) -> Dict[str, Any]:
+        """
+        解析JSON字符串
 
-    def get_parse_stats(self) -> Dict[str, int]:
-        """获取解析统计信息"""
-        return self.parse_stats.copy()
+        Args:
+            json_str (str): JSON字符串
+
+        Returns:
+            Dict[str, Any]: 解析后的字典
+        """
+        try:
+            return json.loads(json_str)
+        except json.JSONDecodeError:
+            # 尝试修复格式后再解析
+            fixed_str = self._fix_json_format(json_str)
+            try:
+                return json.loads(fixed_str)
+            except json.JSONDecodeError:
+                return {'error': 'Invalid JSON format', 'raw': json_str}
+
+    def extract_video_info(self, content: str) -> Optional[Dict[str, Any]]:
+        """
+        从内容中提取视频信息
+
+        Args:
+            content (str): 内容文本
+
+        Returns:
+            Optional[Dict[str, Any]]: 提取的视频信息，如果没有找到有效信息则返回None
+        """
+        if not content or not isinstance(content, str):
+            return None
+
+        content = content.strip()
+        if not content:
+            return None
+
+        video_info = {}
+
+        # 提取标题
+        title = self._extract_title(content)
+        if title:
+            video_info['title'] = title
+
+        # 提取视频URL
+        video_url = self._extract_video_url(content)
+        if video_url:
+            video_info['video_url'] = video_url
+
+        # 提取封面URL
+        cover_url = self._extract_cover_url(content)
+        if cover_url:
+            video_info['cover_url'] = cover_url
+
+        # 提取作者
+        author = self._extract_author(content)
+        if author:
+            video_info['author'] = author
+
+        # 提取日期
+        video_date = self._extract_date(content)
+        if video_date:
+            video_info['video_date'] = video_date
+        else:
+            video_info['video_date'] = datetime.now().strftime('%Y-%m-%d')
+
+        # 提取标签
+        tags = self._extract_tags(content)
+        if tags:
+            video_info['tags'] = tags
+
+        # 提取时长
+        duration = self._extract_duration(content)
+        if duration:
+            video_info['duration'] = duration
+
+        # 提取文件大小
+        file_size = self._extract_file_size(content)
+        if file_size:
+            video_info['file_size'] = file_size
+
+        # 提取分辨率
+        resolution = self._extract_resolution(content)
+        if resolution:
+            video_info['resolution'] = resolution
+
+        # 如果没有标题，使用内容的前50个字符作为标题
+        if not video_info.get('title'):
+            if len(content) > 50:
+                video_info['title'] = content[:50] + '...'
+            else:
+                video_info['title'] = content
+
+        # 只有当至少有标题时才返回结果
+        if video_info.get('title'):
+            return video_info
+
+        return None
+
+    def _extract_title(self, content: str) -> Optional[str]:
+        """提取标题"""
+        # 尝试多种标题模式
+        title_patterns = [
+            r'title[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'标题[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'<title>([^<]+)</title>',
+            r'【([^】]+)】',
+            r'《([^》]+)》',
+            r'^([^。！？\n]{5,50})',  # 开头的短句作为标题
+        ]
+
+        for pattern in title_patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                title = match.group(1).strip()
+                if len(title) > 3:
+                    return title
+
+        return None
+
+    def _extract_video_url(self, content: str) -> Optional[str]:
+        """提取视频URL"""
+        # 视频URL模式
+        video_patterns = [
+            r'https?://[^\s<>"\']+\.(?:mp4|avi|mov|mkv|flv|wmv|webm|m4v)',
+            r'video_url[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'videoUrl[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'url[\'"]?\s*[:=]\s*[\'"]([^\'"\s]+\.(?:mp4|avi|mov|mkv|flv|wmv|webm|m4v))[\'"]',
+        ]
+
+        for pattern in video_patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                url = match.group(1) if match.groups() else match.group(0)
+                if url and url.startswith('http'):
+                    return url
+
+        return None
+
+    def _extract_cover_url(self, content: str) -> Optional[str]:
+        """提取封面URL"""
+        # 封面URL模式
+        cover_patterns = [
+            r'https?://[^\s<>"\']+\.(?:jpg|jpeg|png|gif|bmp|webp)',
+            r'cover[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'coverUrl[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'thumbnail[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'poster[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+        ]
+
+        for pattern in cover_patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                url = match.group(1) if match.groups() else match.group(0)
+                if url and url.startswith('http'):
+                    return url
+
+        return None
+
+    def _extract_author(self, content: str) -> Optional[str]:
+        """提取作者"""
+        author_patterns = [
+            r'author[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'creator[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'uploader[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'作者[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'UP主[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'@(\w+)',
+        ]
+
+        for pattern in author_patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                author = match.group(1).strip()
+                if len(author) > 1:
+                    return author
+
+        return None
+
+    def _extract_date(self, content: str) -> Optional[str]:
+        """提取日期"""
+        date_patterns = [
+            r'date[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'created[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'published[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'时间[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'(\d{4}[-/]\d{1,2}[-/]\d{1,2})',
+            r'(\d{4}年\d{1,2}月\d{1,2}日)',
+        ]
+
+        for pattern in date_patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                date_str = match.group(1).strip()
+                if len(date_str) > 5:
+                    return date_str
+
+        return None
+
+    def _extract_tags(self, content: str) -> Optional[str]:
+        """提取标签"""
+        tag_patterns = [
+            r'tags[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'keywords[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'标签[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'#(\w+)',
+        ]
+
+        tags = []
+        for pattern in tag_patterns:
+            matches = re.findall(pattern, content, re.IGNORECASE)
+            tags.extend(matches)
+
+        if tags:
+            return ', '.join(set(tags))
+
+        return None
+
+    def _extract_duration(self, content: str) -> Optional[str]:
+        """提取时长"""
+        duration_patterns = [
+            r'duration[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'length[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'时长[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'(\d{1,2}:\d{2}:\d{2})',
+            r'(\d{1,2}:\d{2})',
+        ]
+
+        for pattern in duration_patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                duration = match.group(1).strip()
+                if ':' in duration or duration.isdigit():
+                    return duration
+
+        return None
+
+    def _extract_file_size(self, content: str) -> Optional[str]:
+        """提取文件大小"""
+        size_patterns = [
+            r'size[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'filesize[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'大小[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'(\d+\.?\d*\s*[KMGT]B)',
+        ]
+
+        for pattern in size_patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                size = match.group(1).strip()
+                if any(unit in size.upper() for unit in ['B', 'KB', 'MB', 'GB', 'TB']):
+                    return size
+
+        return None
+
+    def _extract_resolution(self, content: str) -> Optional[str]:
+        """提取分辨率"""
+        resolution_patterns = [
+            r'resolution[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'quality[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'分辨率[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
+            r'(\d{3,4}[x×]\d{3,4})',
+            r'(\d{3,4}p)',
+        ]
+
+        for pattern in resolution_patterns:
+            match = re.search(pattern, content, re.IGNORECASE)
+            if match:
+                resolution = match.group(1).strip()
+                if 'x' in resolution or 'p' in resolution:
+                    return resolution
+
+        return None
+
+    def get_parse_stats(self):
+        return self.parse_stats
