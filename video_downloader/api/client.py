@@ -29,7 +29,7 @@ class APIClient:
         self.session.proxies = {}  # 清空代理设置
 
     def fetch_api_data_with_retry(self,
-                                  size: int = 50,
+                                  size: int = 10,
                                   verify_ssl: bool = False,
                                   max_retries: int = 3,
                                   retry_delay: float = 1.0,
@@ -77,7 +77,7 @@ class APIClient:
         print(f"💥 API请求失败，已重试 {max_retries} 次")
         return {}
 
-    def fetch_api_data(self, size: int = 50, verify_ssl: bool = False) -> Dict[str, Any]:
+    def fetch_api_data(self, size: int = 10, verify_ssl: bool = False) -> Dict[str, Any]:
         """
         从API接口获取数据
 

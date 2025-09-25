@@ -42,7 +42,7 @@ class MemefansAPIClient:
 
     def fetch_data_with_retry(self,
                              page: int = 1,
-                             size: int = 10,
+                             size: int = 20,
                              max_retries: int = 3,
                              retry_delay: float = 1.0,
                              backoff_factor: float = 2.0) -> Dict[str, Any]:
