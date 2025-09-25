@@ -1229,7 +1229,7 @@ class CLIVideoDownloaderApp:
         try:
             # 第1步：从Memefans API获取数据（使用默认参数）
             print("📡 第1步：从Memefans API获取数据...")
-            api_data = self.memefans_client.fetch_data_with_retry(page=1, size=10)
+            api_data = self.memefans_client.fetch_data_with_retry(page=1, size=20)
 
             if not api_data:
                 print("❌ 无法从Memefans API获取数据")
