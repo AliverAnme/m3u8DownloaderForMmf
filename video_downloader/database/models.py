@@ -47,6 +47,7 @@ class VideoRecord:
         if not item_data:
             raise ValueError("API数据为空")
 
+        title_temp = item_data.get("title")
         description = item_data.get('description', '')
         cover = item_data.get('cover', '')
         url = item_data.get('url', '')
@@ -74,8 +75,11 @@ class VideoRecord:
             # 尝试更宽松的提取方法
             title = cls._extract_title_fallback(description)
 
-        # 提取video_date：从description中提取"连续4位数字"
-        video_date = cls._extract_video_date(description)
+        # 如果标题提取失败或为空，再次尝试其他方法
+        if not title or len(title.strip()) == 0:
+            title = title_temp
+        # 提取video_date：从title中提取"连续4位数字"
+        video_date = cls._extract_video_date(title)
 
         # 提取uid：从item_data中提取uid字段
         uid = item_data.get('uid', '') or cls._extract_uid(description)
