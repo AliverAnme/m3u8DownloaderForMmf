@@ -693,9 +693,12 @@ class DownloadManager:
                     print(f"❌ 视频下载失败: {video.title}")
                     return False
 
-                # 3. 合并视频和封面 - 直接保存到下载目录，不创建子文件夹
+                # 3. 合并视频和封面 - 保存到按日期分类的子文件夹中
+                date_folder = os.path.join(download_dir, safe_date)
+                os.makedirs(date_folder, exist_ok=True)
+
                 output_filename = f"{safe_title}_{safe_date}.{self.config.OUTPUT_FORMAT}"
-                output_path = os.path.join(download_dir, output_filename)
+                output_path = os.path.join(date_folder, output_filename)
 
                 success = self.merge_video_with_cover(video_path, audio_path, cover_path, output_path)
 
@@ -763,8 +766,11 @@ class DownloadManager:
                 if not force:
                     safe_title = self.sanitize_filename(video.title)
                     safe_date = self.sanitize_filename(video.video_date)
+
+                    # 构建按日期分类的路径
+                    date_folder = os.path.join(download_dir, safe_date)
                     output_filename = f"{safe_title}_{safe_date}.{self.config.OUTPUT_FORMAT}"
-                    output_path = os.path.join(download_dir, output_filename)
+                    output_path = os.path.join(date_folder, output_filename)
 
                     if os.path.exists(output_path):
                         print(f"📁 文件已存在，跳过: {video.title}")
