@@ -1150,7 +1150,7 @@ class CLIVideoDownloaderApp:
             print(f"   API页码: 1（默认）")
             print(f"   每页数据量: 10（默认）")
             print(f"   自动下载: ✅ 启用（跳过已存在文件）")
-            print(f"   自动上传: ✅ 启用（仅上传新下载的视频）")
+            # print(f"   自动上传: ✅ 启用（仅上传新下载的视频）")
             print(f"   本地文件检测: ✅ 启用")
 
             if not self.ui.confirm_action("确认开始执行Memefans API定时调度？（按Ctrl+C停止）"):
