@@ -5,7 +5,7 @@
 
 import sys
 import os
-import importlib
+# import importlib
 
 # 将项目根目录添加到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -46,7 +46,7 @@ def clear_module_cache():
 clear_module_cache()
 
 # 强制重新导入
-import importlib
+# import importlib
 if 'video_downloader.api.memefans_client' in sys.modules:
     del sys.modules['video_downloader.api.memefans_client']
 

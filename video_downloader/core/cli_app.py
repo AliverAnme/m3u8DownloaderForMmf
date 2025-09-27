@@ -5,10 +5,11 @@
 import os
 import importlib
 import time
-import json
-import traceback
-from datetime import datetime
-from typing import List, Dict, Any, Optional
+# import json
+# import traceback
+# from datetime import datetime
+from typing import List
+# from typing import List, Dict, Any, Optional
 
 from ..api.client import APIClient
 from ..api.feed_parser import FeedParser
@@ -1110,10 +1111,11 @@ class CLIVideoDownloaderApp:
                     self.ui.show_download_result(stats)
 
             # 第5步：自动上传（如果启用且有已下载的视频）
+            upload_success_count = 0
             if auto_upload and downloaded_videos:
                 self.ui.show_info("☁️ 第5步：自动上传到坚果云...")
 
-                upload_success_count = 0
+
                 for video in downloaded_videos:
                     if self._upload_video_file(video):
                         upload_success_count += 1
