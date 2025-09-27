@@ -138,7 +138,7 @@ data/                    # 数据文件目录 (数据库、配置文件等)
 
 ## 联系方式
 
-📮：m3u8DownloaderForMmf@hotmail.com
+📮邮箱：m3u8DownloaderForMmf@hotmail.com
 
 ---
 
