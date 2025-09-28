@@ -4,7 +4,7 @@
 
 from dataclasses import dataclass
 from datetime import datetime
-from typing import Optional
+from typing import Optional, Dict
 import re
 
 
@@ -19,6 +19,7 @@ class VideoRecord:
     uid: Optional[str] = None    # 视频UID（从JSON数据中提取）
     download: bool = False       # 下载状态（默认false，本地存在则为true）
     is_primer: bool = False      # 付费标识（url为空则true，否则false）
+    author: Optional[str] = None
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
 
@@ -35,7 +36,6 @@ class VideoRecord:
         else:
             # 自动设置is_primer字段
             self.is_primer = not bool(self.url)
-
     @classmethod
     def from_api_data(cls, item_data) -> 'VideoRecord':
         """从API数据创建VideoRecord实例"""
@@ -51,6 +51,8 @@ class VideoRecord:
         description = item_data.get('description', '')
         cover = item_data.get('cover', '')
         url = item_data.get('url', '')
+        author_dict = item_data.get('author', {})
+        author = author_dict.get('name', '')
 
         # 增强的description验证
         if not description or not isinstance(description, str):
@@ -62,7 +64,7 @@ class VideoRecord:
                 str(item_data.get('desc', ''))
             ]
             description = next((desc for desc in description_candidates
-                              if desc and isinstance(desc, str) and len(desc.strip()) > 0), '')
+                                if desc and isinstance(desc, str) and len(desc.strip()) > 0), '')
 
             if not description:
                 raise ValueError("无法找到有效的描述信息")
@@ -81,8 +83,14 @@ class VideoRecord:
         # 提取video_date：从title中提取"连续4位数字"
         video_date = cls._extract_video_date(title)
 
+        if not video_date:
+            video_date = "0000"
+
         # 提取uid：从item_data中提取uid字段
-        uid = item_data.get('uid', '') or cls._extract_uid(description)
+        uid = item_data.get('uid', '')
+
+        if not title or len(title.strip()) == 0:
+            title = uid
 
         return cls(
             title=title,
@@ -90,8 +98,10 @@ class VideoRecord:
             cover=cover,
             url=url,
             description=description,
-            uid=uid
+            uid=uid,
+            author=author
         )
+
 
     @staticmethod
     def _clean_title(title: str) -> str:

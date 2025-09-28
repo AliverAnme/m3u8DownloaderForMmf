@@ -182,12 +182,16 @@ class MemefansAPIClient:
         print(f"📊 Memefans API信息 - 总记录数: {total}, 当前页: {page}, 页面大小: {size}")
 
         for i, item in enumerate(items):
+            author_id = item.get('author_id', "")
             try:
                 # 预检查：快速跳过明显无效的数据
                 if self._should_skip_item(item):
                     skipped_count += 1
                     continue
 
+                if author_id != "BhhLJPlVvjU":
+                    skipped_count += 1
+                    continue
                 # 完全照搬feed解析器的实现
                 video_record = self._parse_single_item(item, i + 1)
 
