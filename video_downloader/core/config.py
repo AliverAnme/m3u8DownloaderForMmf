@@ -5,7 +5,7 @@ class Config:
     # API配置
     API_BASE_URL = "https://api.memefans.ai/v2/posts/"
     DEFAULT_AUTHOR_ID = "BhhLJPlVvjU"
-    DEFAULT_PAGE_SIZE = 20
+    DEFAULT_PAGE_SIZE = 30
     API_TIMEOUT = 30
 
     # 请求头配置
