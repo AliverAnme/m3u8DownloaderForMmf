@@ -4,17 +4,17 @@
 """
 
 import os
-import subprocess
-import tempfile
 import re
 import shutil
-import threading
+import subprocess
+import tempfile
 import time
 import urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional, Dict, Any, List, Tuple
-import requests
+
 import m3u8
+import requests
 
 from ..core.config import Config
 from ..database.models import VideoRecord
@@ -44,7 +44,8 @@ class DownloadManager:
             self.session.trust_env = False
             self.session.proxies = {}
 
-    def sanitize_filename(self, filename: str) -> str:
+    @staticmethod
+    def sanitize_filename(filename: str) -> str:
         """
         清理文件名，去除不合法字符和标签
 
@@ -85,7 +86,8 @@ class DownloadManager:
 
         return filename
 
-    def check_ffmpeg(self) -> bool:
+    @staticmethod
+    def check_ffmpeg() -> bool:
         """检查ffmpeg是否可用"""
         try:
             result = subprocess.run(['ffmpeg', '-version'],
@@ -566,23 +568,24 @@ class DownloadManager:
             traceback.print_exc()
             return None, None
 
-    def reconstruct_stream_url(self, base_url: str, stream_info: Dict) -> Optional[str]:
-        """从基础URL和流信息重构完整的流URL"""
-        try:
-            # 如果流信息中有完整URL，直接使用
-            if 'url' in stream_info:
-                return stream_info['url']
-
-            # 否则尝试从segments中获取base_url
-            if 'base_url' in stream_info:
-                return stream_info['base_url']
-
-            # 如果都没有，返回None
-            return None
-
-        except Exception as e:
-            print(f"❌ 重构流URL失败: {e}")
-            return None
+    # @staticmethod
+    # def reconstruct_stream_url(base_url: str, stream_info: Dict) -> Optional[str]:
+    #     """从基础URL和流信息重构完整的流URL"""
+    #     try:
+    #         # 如果流信息中有完整URL，直接使用
+    #         if 'url' in stream_info:
+    #             return stream_info['url']
+    #
+    #         # 否则尝试从segments中获取base_url
+    #         if 'base_url' in stream_info:
+    #             return stream_info['base_url']
+    #
+    #         # 如果都没有，返回None
+    #         return None
+    #
+    #     except Exception as e:
+    #         print(f"❌ 重构流URL失败: {e}")
+    #         return None
 
     def download_single_stream(self, url: str, temp_dir: str, stream_type: str) -> Optional[str]:
         """使用ffmpeg下载单个流文件"""
@@ -643,7 +646,8 @@ class DownloadManager:
             print(f"❌ 下载{stream_type}流异常: {e}")
             return None
 
-    def verify_stream_file(self, file_path: str, stream_type: str) -> bool:
+    @staticmethod
+    def verify_stream_file(file_path: str, stream_type: str) -> bool:
         """验证下载的流文件是否有效"""
         try:
             if stream_type == "audio":
@@ -667,6 +671,9 @@ class DownloadManager:
 
     def download_video(self, video: VideoRecord, download_dir: str) -> bool:
         """下载单个视频"""
+        if not video:
+            return False
+
         if not video.url:
             print(f"⚠️ 跳过付费视频: {video.title}")
             return False
@@ -970,7 +977,8 @@ class DownloadManager:
             print(f"❌ 视频处理异常: {e}")
             return False
 
-    def check_audio_in_file(self, file_path: str) -> bool:
+    @staticmethod
+    def check_audio_in_file(file_path: str) -> bool:
         """检查文件是否包含音频流"""
         try:
             cmd = ['ffprobe', '-v', 'quiet', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', file_path]
@@ -1038,7 +1046,8 @@ class DownloadManager:
             print(f"❌ 视频处理异常（无封面）: {e}")
             return False
 
-    def verify_audio_in_output(self, video_path: str) -> bool:
+    @staticmethod
+    def verify_audio_in_output(video_path: str) -> bool:
         """验证输出视频是否包含音频流"""
         try:
             cmd = ['ffprobe', '-v', 'quiet', '-select_streams', 'a', '-show_entries', 'stream=codec_name', '-of', 'csv=p=0', video_path]

@@ -3,7 +3,7 @@
 """
 
 import os
-from typing import List
+from typing import List, Any
 from ..database.models import VideoRecord
 
 
@@ -13,7 +13,8 @@ class UserInterface:
     def __init__(self):
         pass
 
-    def show_main_menu(self) -> str:
+    @staticmethod
+    def show_main_menu() -> str:
         """显示主菜单并获取用户输入"""
         print("\n" + "="*60)
         print("🎬 【视频解析与下载工具】")
@@ -36,7 +37,8 @@ class UserInterface:
                 return choice
             print("❌ 无效输入，请输入正确的选项编号")
 
-    def show_download_menu(self) -> str:
+    @staticmethod
+    def show_download_menu() -> str:
         """显示下载子菜单并获取用户输入"""
         print("\n" + "="*60)
         print("📥 【下载操作子菜单】")
@@ -55,7 +57,8 @@ class UserInterface:
                 return choice
             print("❌ 无效输入，请输入1-6之间的数字")
 
-    def show_api_menu(self) -> str:
+    @staticmethod
+    def show_api_menu() -> str:
         """显示API操作子菜单并获取用户输入"""
         print("\n" + "="*60)
         print("🔄 【API解析操作子菜单】")
@@ -73,7 +76,8 @@ class UserInterface:
                 return choice
             print("❌ 无效输入，请输入1-5之间的数字")
 
-    def show_enhanced_parsing_menu(self) -> str:
+    @staticmethod
+    def show_enhanced_parsing_menu() -> str:
         """显示增强解析菜单并获取用户输入"""
         print("\n" + "="*50)
         print("🔍 【增强JSON解析选项】")
@@ -90,7 +94,8 @@ class UserInterface:
                 return choice
             print("❌ 无效输入，请输入1-4之间的数字")
 
-    def show_cloud_upload_menu(self) -> str:
+    @staticmethod
+    def show_cloud_upload_menu() -> str:
         """显示坚果云上传菜单并获取用户输入"""
         print("\n" + "="*60)
         print("☁️ 【坚果云上传子菜单】")
@@ -109,7 +114,8 @@ class UserInterface:
                 return choice
             print("❌ 无效输入，请输入1-6之间的数字")
 
-    def get_video_date_input(self, prompt: str = "请输入视频日期（4位数字，如0714）") -> str:
+    @staticmethod
+    def get_video_date_input(prompt: str = "请输入视频日期（4位数字，如0714）") -> str:
         """获取视频日期输入"""
         while True:
             date_input = input(f"{prompt}: ").strip()
@@ -125,7 +131,8 @@ class UserInterface:
             return self.get_search_input(prompt)
         return search_input
 
-    def confirm_action(self, message: str) -> bool:
+    @staticmethod
+    def confirm_action(message: str) -> bool:
         """确认操作"""
         while True:
             choice = input(f"{message} (y/n): ").strip().lower()
@@ -135,7 +142,8 @@ class UserInterface:
                 return False
             print("❌ 请输入 y 或 n")
 
-    def display_video_list(self, videos: List[VideoRecord], title: str = "视频列表"):
+    @staticmethod
+    def display_video_list(videos: List[VideoRecord], title: str = "视频列表"):
         """显示视频列表"""
         if not videos:
             print(f"\n📋 {title}: 暂无数据")
@@ -156,7 +164,8 @@ class UserInterface:
 
         print("-" * 100)
 
-    def display_statistics(self, stats: dict):
+    @staticmethod
+    def display_statistics(stats: dict):
         """显示统计信息"""
         print("\n📊 数据库统计信息:")
         print("-" * 40)
@@ -166,12 +175,14 @@ class UserInterface:
         print(f"💰 付费视频: {stats.get('primer', 0)}")
         print("-" * 40)
 
-    def show_progress(self, current: int, total: int, item_name: str = "项"):
+    @staticmethod
+    def show_progress(current: int, total: int, item_name: str = "项"):
         """显示进度"""
         percentage = (current / total * 100) if total > 0 else 0
         print(f"📊 进度: {current}/{total} ({percentage:.1f}%) - {item_name}")
 
-    def show_download_result(self, stats: dict):
+    @staticmethod
+    def show_download_result(stats: dict):
         """显示下载结果统计"""
         print("\n🎯 下载结果统计:")
         print("-" * 30)
@@ -180,31 +191,38 @@ class UserInterface:
         print(f"⏭️ 跳过: {stats.get('skipped', 0)}")
         print("-" * 30)
 
-    def wait_for_enter(self, message: str = "按回车键继续..."):
+    @staticmethod
+    def wait_for_enter(message: str = "按回车键继续..."):
         """等待用户按回车"""
         input(f"\n{message}")
 
-    def clear_screen(self):
+    @staticmethod
+    def clear_screen():
         """清屏"""
         os.system('cls' if os.name == 'nt' else 'clear')
 
-    def show_error(self, message: str):
+    @staticmethod
+    def show_error(message: str):
         """显示错误信息"""
         print(f"❌ 错误: {message}")
 
-    def show_success(self, message: str):
+    @staticmethod
+    def show_success(message: str):
         """显示成功信息"""
         print(f"✅ {message}")
 
-    def show_warning(self, message: str):
+    @staticmethod
+    def show_warning(message: str):
         """显示警告信息"""
         print(f"⚠️ 警告: {message}")
 
-    def show_info(self, message: str):
+    @staticmethod
+    def show_info(message: str):
         """显示信息"""
         print(f"ℹ️ {message}")
 
-    def show_startup_banner(self):
+    @staticmethod
+    def show_startup_banner():
         """显示启动横幅"""
         print("\n" + "="*60)
         print("🎬 视频解析与下载工具")
@@ -213,12 +231,13 @@ class UserInterface:
         print("☁️ 支持坚果云WebDAV上传")
         print("="*60)
 
-    def show_exit_message(self):
+    @staticmethod
+    def show_exit_message():
         """显示退出信息"""
         print("\n👋 感谢使用视频解析与下载工具！")
         print("🔧 程序已安全退出")
 
-    def get_index_selection(self, videos: List[VideoRecord]) -> List[int]:
+    def get_index_selection(self, videos: List[VideoRecord]) -> None | list[int] | list[Any]:
         """获取用户选择的视频序号"""
         if not videos:
             return []
@@ -265,7 +284,8 @@ class UserInterface:
                 print("重新选择...")
                 continue
 
-    def _parse_selection(self, selection_input: str, max_count: int) -> List[int]:
+    @staticmethod
+    def _parse_selection(selection_input: str, max_count: int) -> List[int]:
         """解析用户的选择输入"""
         import re
         selections = []
@@ -306,7 +326,8 @@ class UserInterface:
         selections = sorted(list(set(selections)))
         return selections
 
-    def get_api_size_input(self, default_size: int = 50) -> int:
+    @staticmethod
+    def get_api_size_input(default_size: int = 50) -> int:
         """获取API请求的size参数"""
         while True:
             size_input = input(f"请输入API请求数据条数 (默认{default_size}, 范围1-200): ").strip()
@@ -323,7 +344,8 @@ class UserInterface:
             except ValueError:
                 print("❌ 请输入有效的数字")
 
-    def get_retry_count_input(self, default: int = 3) -> int:
+    @staticmethod
+    def get_retry_count_input(default: int = 3) -> int:
         """获取重试次数输入"""
         while True:
             try:
@@ -338,7 +360,8 @@ class UserInterface:
             except ValueError:
                 print("❌ 请输入有效的数字")
 
-    def get_retry_delay_input(self) -> float:
+    @staticmethod
+    def get_retry_delay_input() -> float:
         """获取重试延迟时间输入"""
         while True:
             try:
@@ -353,7 +376,8 @@ class UserInterface:
             except ValueError:
                 print("❌ 请输入有效的数字")
 
-    def get_pages_input(self) -> str:
+    @staticmethod
+    def get_pages_input() -> str:
         """获取页码输入"""
         print("\n📄 页码输入格式说明:")
         print("  - 单个页码: 1")
@@ -367,7 +391,8 @@ class UserInterface:
                 return pages_input
             print("❌ 页码输入不能为空")
 
-    def get_page_delay_input(self) -> float:
+    @staticmethod
+    def get_page_delay_input() -> float:
         """获取页面间延迟时间输入"""
         while True:
             try:
@@ -382,7 +407,8 @@ class UserInterface:
             except ValueError:
                 print("❌ 请输入有效的数字")
 
-    def get_json_file_path_input(self) -> str:
+    @staticmethod
+    def get_json_file_path_input() -> str | None:
         """获取JSON文件路径输入"""
         print("\n💡 提示：可以输入绝对路径或相对路径")
         print("   示例：video_downloader/data/api_response.json")
@@ -407,7 +433,8 @@ class UserInterface:
                 if retry not in ['y', 'yes', '是']:
                     return ""
 
-    def get_feed_file_path_input(self, default_path: str = None) -> str:
+    @staticmethod
+    def get_feed_file_path_input(default_path: str = None) -> str | None:
         """获取Feed文件路径输入"""
         if default_path:
             print(f"\n💡 提示：请输入feed.json文件的路径（默认: {default_path}）")
@@ -441,7 +468,8 @@ class UserInterface:
                 if retry not in ['y', 'yes', '是']:
                     return ""
 
-    def get_request_delay_input(self, default: float = 2.0) -> float:
+    @staticmethod
+    def get_request_delay_input(default: float = 2.0) -> float:
         """获取请求延迟时间输入"""
         while True:
             try:
@@ -456,7 +484,8 @@ class UserInterface:
             except ValueError:
                 print("❌ 请输入有效的数字")
 
-    def get_jianguoyun_username(self) -> str:
+    @staticmethod
+    def get_jianguoyun_username() -> str:
         """获取坚果云用户名输入"""
         print("\n💡 提示：请输入您的坚果云用户名（通常是邮箱地址）")
         while True:
@@ -465,7 +494,8 @@ class UserInterface:
                 return username
             print("❌ 用户名不能为空")
 
-    def get_jianguoyun_password(self) -> str:
+    @staticmethod
+    def get_jianguoyun_password() -> str:
         """获取坚果云应用密码输入"""
         print("\n💡 提示：请输入坚果云应用密码（非登录密码）")
         print("   如何获取应用密码：")
@@ -482,7 +512,8 @@ class UserInterface:
                 return password
             print("❌ 应用密码不能为空")
 
-    def get_memefans_api_params(self) -> tuple:
+    @staticmethod
+    def get_memefans_api_params() -> tuple:
         """获取Memefans API请求参数"""
         print("\n🔧 Memefans API参数设置")
         print("-" * 40)

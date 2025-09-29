@@ -8,7 +8,6 @@ import json
 import urllib3
 import time
 from typing import Dict, Any, List, Optional
-from datetime import datetime
 
 from ..core.config import Config
 from ..database.models import VideoRecord
@@ -213,7 +212,8 @@ class MemefansAPIClient:
 
         return video_records
 
-    def _should_skip_item(self, item) -> bool:
+    @staticmethod
+    def _should_skip_item(item) -> bool:
         """预检查是否应该跳过某个数据项"""
         try:
             # 空值检查

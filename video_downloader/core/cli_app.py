@@ -38,9 +38,9 @@ class CLIVideoDownloaderApp:
         # 动态导入UI模块以确保获取最新版本
         ui_module = importlib.import_module('video_downloader.ui.interface')
         importlib.reload(ui_module)
-        UserInterface = getattr(ui_module, 'UserInterface')
+        user_interface = getattr(ui_module, 'UserInterface')
 
-        self.ui = UserInterface()
+        self.ui = user_interface()
         self.api_client = APIClient()
         self.feed_parser = FeedParser()
         self.memefans_client = MemefansAPIClient()
@@ -366,7 +366,8 @@ class CLIVideoDownloaderApp:
             import traceback
             traceback.print_exc()
 
-    def _parse_pages_input(self, pages_input: str) -> List[int]:
+    @staticmethod
+    def _parse_pages_input(pages_input: str) -> List[int]:
         """解析页码输入"""
         try:
             pages = []
@@ -829,7 +830,8 @@ class CLIVideoDownloaderApp:
             import traceback
             traceback.print_exc()
 
-    def _save_feed_cache(self, video_records: List[VideoRecord], cache_file_path: str):
+    @staticmethod
+    def _save_feed_cache(video_records: List[VideoRecord], cache_file_path: str):
         """保存feed解析结果到缓存文件"""
         try:
             cache_data = {
@@ -1320,7 +1322,8 @@ class CLIVideoDownloaderApp:
 
         return videos_to_download
 
-    def _wait_for_next_cycle(self, seconds: int):
+    @staticmethod
+    def _wait_for_next_cycle(seconds: int):
         """等待下一个调度周期，显示倒计时"""
         try:
             print(f"\n⏳ 等待下一轮调度...")

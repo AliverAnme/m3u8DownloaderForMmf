@@ -78,7 +78,8 @@ class DataProcessor:
             print(f"❌ 增强解析文件时发生错误: {e}")
             return {}
 
-    def clean_title(self, title: str) -> str:
+    @staticmethod
+    def clean_title(title: str) -> str:
         """
         清理标题，去除换行符、多余空白符和特定标签
 
@@ -312,7 +313,8 @@ class DataProcessor:
             print(f"❌ 解析本地JSON文件失败: {e}")
             return []
 
-    def _extract_uid_from_item(self, item: Dict[str, Any]) -> str:
+    @staticmethod
+    def _extract_uid_from_item(item: Dict[str, Any]) -> str:
         """
         从数据项中提取UID字段
 

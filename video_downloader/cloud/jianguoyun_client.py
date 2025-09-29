@@ -65,8 +65,7 @@ class JianguoyunClient:
             print(f"❌ 创建目录异常: {e}")
             return False
 
-    def upload_file(self, local_file_path: str, remote_file_path: str,
-                   progress_callback=None) -> bool:
+    def upload_file(self, local_file_path: str, remote_file_path: str) -> bool:
         """
         上传文件到坚果云
 

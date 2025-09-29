@@ -165,7 +165,8 @@ class EnhancedJSONParser:
         # 尝试从字符串中提取信息
         return self._extract_from_string(item, index)
 
-    def _is_object_representation(self, text: str) -> bool:
+    @staticmethod
+    def _is_object_representation(text: str) -> bool:
         """检查字符串是否是对象表示"""
         patterns = [
             r'<.*?object\s+at\s+0x[0-9a-f]+>',  # <Video object at 0x...>
@@ -218,7 +219,8 @@ class EnhancedJSONParser:
 
         return params
 
-    def _split_parameters(self, params_str: str) -> List[str]:
+    @staticmethod
+    def _split_parameters(params_str: str) -> List[str]:
         """智能分割参数字符串"""
         items = []
         current = ""
@@ -250,7 +252,8 @@ class EnhancedJSONParser:
 
         return items
 
-    def _parse_parameter_value(self, value: str) -> Any:
+    @staticmethod
+    def _parse_parameter_value(value: str) -> Any:
         """解析参数值"""
         value = value.strip()
 
@@ -285,7 +288,8 @@ class EnhancedJSONParser:
         # 返回原始字符串
         return value
 
-    def _extract_common_fields(self, text: str, result: Dict[str, Any]):
+    @staticmethod
+    def _extract_common_fields(text: str, result: Dict[str, Any]):
         """从文本中提取常见字段"""
         # 提取常见的字段模式
         patterns = {
@@ -316,13 +320,15 @@ class EnhancedJSONParser:
 
         return normalized
 
-    def _looks_like_json(self, text: str) -> bool:
+    @staticmethod
+    def _looks_like_json(text: str) -> bool:
         """检查字符串是否像JSON格式"""
         text = text.strip()
         return (text.startswith('{') and text.endswith('}')) or \
                (text.startswith('[') and text.endswith(']'))
 
-    def _fix_json_format(self, text: str) -> str:
+    @staticmethod
+    def _fix_json_format(text: str) -> str:
         """修复常见的JSON格式问题"""
         # 移除BOM
         if text.startswith('\ufeff'):
@@ -341,7 +347,8 @@ class EnhancedJSONParser:
 
         return text
 
-    def _extract_json_fragments(self, text: str) -> Dict[str, Any]:
+    @staticmethod
+    def _extract_json_fragments(text: str) -> Dict[str, Any]:
         """从文本中提取JSON片段"""
         result = {'items': [], '_source': 'text_extraction'}
 
@@ -395,7 +402,8 @@ class EnhancedJSONParser:
 
         return result if len(result) > 3 else None
 
-    def _parse_object_item(self, obj: Any) -> Dict[str, Any]:
+    @staticmethod
+    def _parse_object_item(obj: Any) -> Dict[str, Any]:
         """解析对象格式的item"""
         result = {'_source': 'object'}
 
@@ -428,7 +436,8 @@ class EnhancedJSONParser:
 
         return result
 
-    def _parse_other_item(self, item: Any, index: int) -> Optional[Dict[str, Any]]:
+    @staticmethod
+    def _parse_other_item(item: Any, index: int) -> Optional[Dict[str, Any]]:
         """解析其他格式的item"""
         result = {
             '_source': 'other',
@@ -562,7 +571,8 @@ class EnhancedJSONParser:
 
         return None
 
-    def _extract_title(self, content: str) -> Optional[str]:
+    @staticmethod
+    def _extract_title(content: str) -> Optional[str]:
         """提取标题"""
         # 尝试多种标题模式
         title_patterns = [
@@ -583,7 +593,8 @@ class EnhancedJSONParser:
 
         return None
 
-    def _extract_video_url(self, content: str) -> Optional[str]:
+    @staticmethod
+    def _extract_video_url(content: str) -> Optional[str]:
         """提取视频URL"""
         # 视频URL模式
         video_patterns = [
@@ -602,7 +613,8 @@ class EnhancedJSONParser:
 
         return None
 
-    def _extract_cover_url(self, content: str) -> Optional[str]:
+    @staticmethod
+    def _extract_cover_url(content: str) -> Optional[str]:
         """提取封面URL"""
         # 封面URL模式
         cover_patterns = [
@@ -622,7 +634,8 @@ class EnhancedJSONParser:
 
         return None
 
-    def _extract_author(self, content: str) -> Optional[str]:
+    @staticmethod
+    def _extract_author(content: str) -> Optional[str]:
         """提取作者"""
         author_patterns = [
             r'author[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
@@ -642,7 +655,8 @@ class EnhancedJSONParser:
 
         return None
 
-    def _extract_date(self, content: str) -> Optional[str]:
+    @staticmethod
+    def _extract_date(content: str) -> Optional[str]:
         """提取日期"""
         date_patterns = [
             r'date[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
@@ -662,7 +676,8 @@ class EnhancedJSONParser:
 
         return None
 
-    def _extract_tags(self, content: str) -> Optional[str]:
+    @staticmethod
+    def _extract_tags(content: str) -> Optional[str]:
         """提取标签"""
         tag_patterns = [
             r'tags[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
@@ -681,7 +696,8 @@ class EnhancedJSONParser:
 
         return None
 
-    def _extract_duration(self, content: str) -> Optional[str]:
+    @staticmethod
+    def _extract_duration(content: str) -> Optional[str]:
         """提取时长"""
         duration_patterns = [
             r'duration[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
@@ -700,7 +716,8 @@ class EnhancedJSONParser:
 
         return None
 
-    def _extract_file_size(self, content: str) -> Optional[str]:
+    @staticmethod
+    def _extract_file_size(content: str) -> Optional[str]:
         """提取文件大小"""
         size_patterns = [
             r'size[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',
@@ -718,7 +735,8 @@ class EnhancedJSONParser:
 
         return None
 
-    def _extract_resolution(self, content: str) -> Optional[str]:
+    @staticmethod
+    def _extract_resolution(content: str) -> Optional[str]:
         """提取分辨率"""
         resolution_patterns = [
             r'resolution[\'"]?\s*[:=]\s*[\'"]([^\'"]+)[\'"]',

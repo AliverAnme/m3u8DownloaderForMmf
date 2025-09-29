@@ -3,13 +3,11 @@
 """
 
 import sqlite3
-import json
 import os
 import threading
 import glob
-import re
-from datetime import datetime, timedelta
-from typing import List, Optional, Dict, Any
+from datetime import datetime
+from typing import List, Dict, Any
 from contextlib import contextmanager
 
 from .models import VideoRecord
@@ -366,7 +364,8 @@ class DatabaseManager:
                 print(f"❌ 同步目录失败: {e}")
                 return 0
 
-    def _row_to_video_record(self, row) -> VideoRecord:
+    @staticmethod
+    def _row_to_video_record(row) -> VideoRecord:
         """将数据库行转换为VideoRecord对象"""
         # 处理uid字段，支持旧数据库没有uid字段的情况
         try:

@@ -200,7 +200,8 @@ class APIClient:
 
         return video_records
 
-    def _should_skip_item(self, item) -> bool:
+    @staticmethod
+    def _should_skip_item(item) -> bool:
         """预检查是否应该跳过某个数据项"""
         try:
             # 空值检查
@@ -257,41 +258,41 @@ class APIClient:
         except Exception:
             return True
 
-    def _parse_single_item(self, item, index: int) -> Optional[VideoRecord]:
-        """
-        解析单个数据项，支持多种数据格式
-
-        Args:
-            item: 单个数据项（可能是字典、对象或其他格式）
-            index: 数据项索引（用于错误提示）
-
-        Returns:
-            Optional[VideoRecord]: 解析成功返回VideoRecord，失败返回None
-        """
-        try:
-            # 解析方式1: 标准字典格式（正确的API格式）
-            if isinstance(item, dict):
-                return self._parse_dict_format(item, index)
-
-            # 解析方式2: Video对象格式
-            elif hasattr(item, '__dict__') and hasattr(item, 'description'):
-                return self._parse_object_format(item, index)
-
-            # 解析方式3: 字符串格式（可能是JSON字符串）
-            elif isinstance(item, str):
-                return self._parse_string_format(item, index)
-
-            # 解析方式4: 列表格式（嵌套数据）
-            elif isinstance(item, list):
-                return self._parse_list_format(item, index)
-
-            # 解析方式5: 其他可能的格式
-            else:
-                return self._parse_unknown_format(item, index)
-
-        except Exception as e:
-            print(f"❌ 第 {index} 条数据解析异常: {e}")
-            return None
+    # def _parse_single_item(self, item, index: int) -> Optional[VideoRecord]:
+    #     """
+    #     解析单个数据项，支持多种数据格式
+    #
+    #     Args:
+    #         item: 单个数据项（可能是字典、对象或其他格式）
+    #         index: 数据项索引（用于错误提示）
+    #
+    #     Returns:
+    #         Optional[VideoRecord]: 解析成功返回VideoRecord，失败返回None
+    #     """
+    #     try:
+    #         # 解析方式1: 标准字典格式（正确的API格式）
+    #         if isinstance(item, dict):
+    #             return self._parse_dict_format(item, index)
+    #
+    #         # 解析方式2: Video对象格式
+    #         elif hasattr(item, '__dict__') and hasattr(item, 'description'):
+    #             return self._parse_object_format(item, index)
+    #
+    #         # 解析方式3: 字符串格式（可能是JSON字符串）
+    #         elif isinstance(item, str):
+    #             return self._parse_string_format(item, index)
+    #
+    #         # 解析方式4: 列表格式（嵌套数据）
+    #         elif isinstance(item, list):
+    #             return self._parse_list_format(item, index)
+    #
+    #         # 解析方式5: 其他可能的格式
+    #         else:
+    #             return self._parse_unknown_format(item, index)
+    #
+    #     except Exception as e:
+    #         print(f"❌ 第 {index} 条数据解析异常: {e}")
+    #         return None
 
     def _parse_dict_format(self, item: dict, index: int) -> Optional[VideoRecord]:
         """解析字典格式的数据（标准API格式）"""
@@ -336,7 +337,8 @@ class APIClient:
             # 尝试降级解析
             return self._fallback_parse_dict(item, index)
 
-    def _fallback_parse_dict(self, item: dict, index: int) -> Optional[VideoRecord]:
+    @staticmethod
+    def _fallback_parse_dict(item: dict, index: int) -> Optional[VideoRecord]:
         """字典格式的降级解析方法"""
         try:
             # 尝试从所有可能的字段中提取信息
@@ -387,7 +389,8 @@ class APIClient:
             print(f"❌ 降级解析也失败 (第 {index} 条): {e}")
             return None
 
-    def _parse_object_format(self, item, index: int) -> Optional[VideoRecord]:
+    @staticmethod
+    def _parse_object_format(item, index: int) -> Optional[VideoRecord]:
         """解析对象格式的数据"""
         try:
             # 尝试从对象属性中提取数据
@@ -468,7 +471,8 @@ class APIClient:
                 print(f"❌ 字符串格式解析异常 (第 {index} 条): {e}")
             return None
 
-    def _is_meaningful_content(self, content: str) -> bool:
+    @staticmethod
+    def _is_meaningful_content(content: str) -> bool:
         """检查内容是否有意义"""
         if not content or len(content.strip()) < 10:
             return False
@@ -502,7 +506,8 @@ class APIClient:
             print(f"❌ 列表格式解析失败 (第 {index} 条): {e}")
             return None
 
-    def _parse_unknown_format(self, item, index: int) -> Optional[VideoRecord]:
+    @staticmethod
+    def _parse_unknown_format(item, index: int) -> Optional[VideoRecord]:
         """解析未知格式的数据"""
         try:
             # 尝试转换为字符串然后当作description处理
@@ -883,7 +888,8 @@ class APIClient:
             print(f"❌ 页面 {page} JSON解析失败: {e}")
             return {}
 
-    def extract_title_from_description(self, description: str) -> str:
+    @staticmethod
+    def extract_title_from_description(description: str) -> str:
         """
         从description中提取标题内容（与DataProcessor保持一致）
 
@@ -948,7 +954,8 @@ class APIClient:
             comments = item.get('comments_count', 0)
             print(f"{i}. {title} (👍{likes} 💬{comments})")
 
-    def parse_api_response_enhanced(self, api_data: Dict[str, Any]) -> List[VideoRecord]:
+    @staticmethod
+    def parse_api_response_enhanced(api_data: Dict[str, Any]) -> List[VideoRecord]:
         """
         使用增强JSON解析器处理API响应数据
 
@@ -1017,7 +1024,8 @@ class APIClient:
 
         return video_records
 
-    def _extract_uid_from_item(self, item: Dict[str, Any]) -> str:
+    @staticmethod
+    def _extract_uid_from_item(item: Dict[str, Any]) -> str:
         """从数据项中提取UID字段"""
         if not isinstance(item, dict):
             return ""

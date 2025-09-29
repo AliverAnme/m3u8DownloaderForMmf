@@ -3,13 +3,11 @@
 """
 
 import os
-import shutil
 import re
-from typing import Dict, List, Optional
-from datetime import datetime
+import shutil
+from typing import Dict
 
 from ..database.manager import DatabaseManager
-from ..database.models import VideoRecord
 
 
 class VideoFileManager:

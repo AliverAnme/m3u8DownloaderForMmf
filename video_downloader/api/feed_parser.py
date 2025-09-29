@@ -160,7 +160,8 @@ class FeedParser:
         print(f"🎉 处理完成，成功获取 {len(video_records)} 个视频记录")
         return video_records
 
-    def _convert_to_video_record(self, video_data: Dict[str, Any], video_id: str) -> Optional[VideoRecord]:
+    @staticmethod
+    def _convert_to_video_record(video_data: Dict[str, Any], video_id: str) -> Optional[VideoRecord]:
         """
         将API返回的视频数据转换为VideoRecord对象
 
