@@ -1146,7 +1146,7 @@ class CLIVideoDownloaderApp:
             self.ui.show_info("⏰ 启动Memefans API定时自动调度解析功能...")
 
             print(f"\n🔧 自动调度配置（新策略）：")
-            print(f"   执行间隔: 5 分钟（固定）")
+            print(f"   执行间隔: 2 分钟（固定）")
             print(f"   策略: 每轮重新开始")
             print(f"   阶段1: Feed API (https://api.memefans.ai/v2/feed) - 最多重试3次")
             print(f"   阶段2: Posts API (https://api.memefans.ai/v2/posts/) - Feed API失败后降级，最多重试3次")
@@ -1197,7 +1197,7 @@ class CLIVideoDownloaderApp:
                     print(f"   执行时间: {current_time}")
 
                     # 等待5分钟（300秒）
-                    self._wait_for_next_cycle(300)
+                    self._wait_for_next_cycle(120)
 
                 except KeyboardInterrupt:
                     print(f"\n\n⏹️ 用户手动停止调度（共执行 {cycle_count} 轮）")

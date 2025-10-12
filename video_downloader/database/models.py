@@ -11,6 +11,7 @@ import re
 @dataclass
 class VideoRecord:
     """视频记录数据模型"""
+    # id: str
     title: str                    # 视频标题（从description中提取）
     video_date: str              # 视频日期（4位数字）
     cover: str                   # 封面图片链接
@@ -31,8 +32,7 @@ class VideoRecord:
             self.updated_at = datetime.now()
 
         # 如果有UID，则使用UID生成新的URL格式
-        if self.uid:
-            self.url = f"https://videodelivery.net/{self.uid}/manifest/video.m3u8"
+        if not self.url:
             self.is_primer = False  # 有UID的视频不是付费内容
         else:
             # 自动设置is_primer字段
@@ -47,11 +47,15 @@ class VideoRecord:
         # 检查必要字段是否存在
         if not item_data:
             raise ValueError("API数据为空")
-
+        id = item_data.get("id")
         title_temp = item_data.get("title")
         description = item_data.get('description', '')
         cover = item_data.get('cover', '')
         url = item_data.get('url', '')
+        uid = item_data.get('uid', '')
+        if not url:
+            url = f"https://videodelivery.net/{uid}/manifest/video.m3u8"
+
         author_dict = item_data.get('author', {})
         author = author_dict.get('name', '')
 
@@ -93,6 +97,7 @@ class VideoRecord:
         if not title or len(title.strip()) == 0:
             title = uid
 
+        print(f"{id}")
         return cls(
             title=title,
             video_date=video_date,

@@ -35,7 +35,8 @@ class MemefansAPIClient:
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
             'Cache-Control': 'no-cache',
-            'authorization': 'Bearer PL5eSlmQlaWxUetfKt_1hYWfwqrUDVC1y_5cUlUP3as'
+            # 'authorization': 'Bearer PL5eSlmQlaWxUetfKt_1hYWfwqrUDVC1y_5cUlUP3as',
+            'authorization': 'Bearer 1HyC9FFPXFXXkhs1xR-wS8-Pid9Nl4SWKX2wOw1F7_s'
         }
         self.session.headers.update(self.default_headers)
 

@@ -1,11 +1,17 @@
 #!/usr/bin/env python3
+# -*- coding: utf-8 -*-
 """
 命令行界面版视频下载器 - 主入口文件
 """
 
 import sys
 import os
+import shutil
+import signal
+import logging
 # import importlib
+
+from logger import info, error
 
 # 将项目根目录添加到Python路径
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -22,7 +28,6 @@ def clear_module_cache():
         del sys.modules[module_name]
 
     # 强制清除__pycache__
-    import shutil
     pycache_dirs = [
         'video_downloader/__pycache__',
         'video_downloader/api/__pycache__',
@@ -35,12 +40,12 @@ def clear_module_cache():
     ]
 
     for pycache_dir in pycache_dirs:
-        if os.path.exists(pycache_dir):
-            try:
+        try:
+            if os.path.exists(pycache_dir):
                 shutil.rmtree(pycache_dir)
-                print(f"🗑️ 清除缓存目录: {pycache_dir}")
-            except Exception as e:
-                print(f"⚠️ 清除缓存失败 {pycache_dir}: {e}")
+                info(f"🗑️ 清除缓存目录: {pycache_dir}")
+        except Exception as e:
+            error(f"⚠️ 清除缓存失败 {pycache_dir}: {e}")
 
 # 清除缓存并重新导入
 clear_module_cache()
@@ -58,16 +63,16 @@ def main():
     主函数 - 运行命令行界面版视频下载器
     """
     try:
-        print("🚀 启动命令行视频下载器")
+        info("🚀 启动命令行视频下载器")
 
         # 创建并运行CLI应用
         app = CLIVideoDownloaderApp()
         app.run()
 
     except KeyboardInterrupt:
-        print("\n\n👋 用户中断程序，正在安全退出...")
+        info("\n\n👋 用户中断程序，正在安全退出...")
     except Exception as e:
-        print(f"❌ 程序运行时发生错误: {e}")
+        error(f"❌ 程序运行时发生错误: {e}")
         import traceback
         traceback.print_exc()
 

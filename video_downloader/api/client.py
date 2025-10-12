@@ -89,11 +89,10 @@ class APIClient:
             Dict[str, Any]: API返回的JSON数据
         """
         # API接口URL
-        base_url = self.config.API_BASE_URL
+        base_url = "https://api.memefans.ai/v2/feed"
 
         # 固定参数
         params = {
-            "author_id": self.config.DEFAULT_AUTHOR_ID,
             "page": 1,
             "size": size
         }

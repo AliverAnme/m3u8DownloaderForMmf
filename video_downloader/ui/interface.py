@@ -541,7 +541,7 @@ class UserInterface:
                     size = 10
                     break
                 size = int(size_input)
-                if 1 <= size <= 50:
+                if 1 <= size <= 100:
                     break
                 else:
                     print("❌ 每页数据量必须在1-50之间")
