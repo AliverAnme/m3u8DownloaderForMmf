@@ -10,18 +10,16 @@ import urllib3
 import logging
 import time
 import argparse
-import m3u8
 import tempfile
-import concurrent.futures
 import threading
 from datetime import datetime
-from dataclasses import dataclass, field, asdict
-from typing import List, Optional, Dict, Any, Tuple
+from dataclasses import asdict
+from typing import List, Optional, Dict, Any
 from contextlib import contextmanager
 from video_downloader.download.manager import DownloadManager
 from data.models.DataModels import *
-from data.models.FeedModels import Feed, FeedVideoItem, FeedAuthor, BindingTokenInfo
-from video_downloader.core.logger import LoggerManager, info, warning, error, critical
+from data.models.FeedModels import Feed, FeedVideoItem
+from video_downloader.core.logger import LoggerManager, info, warning, error
 
 # 禁用urllib3的不安全请求警告
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
