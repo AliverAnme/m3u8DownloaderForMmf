@@ -2,7 +2,10 @@
 下载管理器模块
 处理视频下载、ffmpeg合并和封面嵌入
 """
-
+import jwt
+import base64
+import json
+from urllib.parse import urlparse
 import os
 import re
 import shutil
@@ -15,6 +18,7 @@ from typing import Optional, Dict, Any, List, Tuple
 
 import m3u8
 import requests
+from urllib3.util import url
 
 from ..core.config import Config
 from ..database.models import VideoRecord
@@ -670,6 +674,70 @@ class DownloadManager:
             error(f"⚠️ {stream_type}流文件验证异常: {e}")
             return False
 
+    def extract_and_decode_jwt(self, url: str) -> str | None:
+        """
+        从URL中提取JWT令牌并解码其内容
+        
+        Args:
+            url (str): 包含JWT令牌的URL
+            
+        Returns:
+            str | None: 解码后的JWT令牌内容，或None如果提取失败
+        """
+        try:
+            # 解析URL以获取路径部分
+            parsed_url = urlparse(url)
+            path = parsed_url.path
+            
+            # 从路径中提取JWT部分（URL通常格式为 /{jwt}/manifest/...）
+            parts = path.strip('/').split('/')
+            
+            # 查找JWT部分（包含多个点的部分）
+            jwt_token = None
+            for part in parts:
+                if part.count('.') == 2:  # JWT通常包含两个点，分为header.payload.signature
+                    jwt_token = part
+                    break
+            
+            if not jwt_token:
+                raise ValueError("在URL中未找到JWT令牌")
+            
+            print(f"提取到的JWT令牌: {jwt_token}")
+            
+            # 分割JWT的三个部分
+            header_part, payload_part, signature_part = jwt_token.split('.')
+            
+            # 解码头部
+            # Base64 URL安全编码可能缺少填充字符，需要添加
+            padding_length = 4 - len(header_part) % 4
+            if padding_length < 4:  # 避免添加不必要的填充
+                header_part += '=' * padding_length
+                
+            header = json.loads(base64.urlsafe_b64decode(header_part).decode('utf-8'))
+            
+            # 解码载荷
+            padding_length = 4 - len(payload_part) % 4
+            if padding_length < 4:
+                payload_part += '=' * padding_length
+                
+            payload = json.loads(base64.urlsafe_b64decode(payload_part).decode('utf-8'))
+            
+            # 返回解码结果
+            result = {
+                "header": header,
+                "payload": payload,
+                "signature": signature_part[:20] + '...'  # 签名部分只显示前20个字符
+            }
+            
+            return result['payload']['sub']
+            
+        except jwt.PyJWTError as e:
+            print(f"JWT处理错误: {e}")
+            return None
+        except Exception as e:
+            print(f"错误: {e}")
+            return None
+
     def download_video(self, video: VideoRecord, download_dir: str) -> bool:
         """下载单个视频"""
         if not video:
@@ -693,9 +761,10 @@ class DownloadManager:
             try:
                 # 1. 下载封面图片
                 cover_path = self.download_cover_image(video.cover, temp_work_dir)
-
+                # url = "https://videodelivery.net/" + self.extract_and_decode_jwt(video.url) + "/manifest.m3u8"
+                url = video.url
                 # 2. 下载视频流
-                video_path, audio_path = self.download_m3u8_streams(video.url, temp_work_dir)
+                video_path, audio_path = self.download_m3u8_streams(url, temp_work_dir)
 
                 if not video_path:
                     error(f"❌ 视频下载失败: {video.title}")

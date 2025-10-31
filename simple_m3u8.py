@@ -1033,12 +1033,14 @@ def check_feed_updates(
     download_dir="./downloads",
     num=5,
     local_json_file="./temp/feed.json",
+    page=1,
 ):
     try:
         info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 开始检查订阅更新...")
 
         # 显示最新10条视频信息
         show_latest_videos(db_manager)
+        feed_url = f"{feed_url}?page={page}&size={num}"
 
         # 请求最新的订阅数据
         data = make_api_request(feed_url)
@@ -1177,69 +1179,17 @@ def process_and_download_videos(
     info(f"处理完成，成功处理{len(videos)}个视频")
 
 
-def update_all_videos(db_manager: SimpleDatabaseManager, download_dir="./downloads"):
+def update_all_videos(db_manager: SimpleDatabaseManager, feed_url, download_dir="./downloads", pages=3):
     """
     更新所有视频数据，包括从API获取最新数据、保存到数据库和下载视频
     """
     try:
-        # 显示最新10条视频信息
-        show_latest_videos(db_manager)
-        total_pages = 0
-        current_page = 1
-        base_url = "https://api.memefans.ai/v2/feed"
-        url = f"{base_url}?page={current_page}&size=50"
-        # 请求最新的订阅数据
-        feed = make_api_request(url)
-        total_pages = feed.pages
-        if feed:
-            info(f"获取到第 {current_page} 页订阅数据，包含 {len(feed.items)} 个视频")
-            # 保存订阅数据到数据库
-            if db_manager.save_feed(feed):
-                info(f"订阅数据已保存到数据库")
-            else:
-                error(f"保存订阅数据到数据库失败")
-
-            # 保存订阅视频关联关系到数据库
-            if db_manager.save_feed_videos("default_feed", feed.items):
-                info(f"订阅视频关联关系已保存到数据库")
-            else:
-                error(f"保存订阅视频关联关系到数据库失败")
-
-            # 如果启用了下载功能，下载所有视频
-            process_and_download_videos(
-                feed.filter_by_author_id("BhhLJPlVvjU"), db_manager, download_dir
+        for page in range(1, pages + 1):
+            check_feed_updates(
+                feed_url, db_manager, not args.no_download, args.interval, download_dir, num=50, page=page
             )
-        else:
-            error(f"获取订阅数据失败，当前页面: {current_page}")
-        current_page += 1
 
-        while current_page <= total_pages:
-            url = f"{base_url}?page={current_page}&size=50"
-            # 请求最新的订阅数据
-            feed = make_api_request(url)
-            current_page += 1
-            if feed:
-                info(
-                    f"获取到第 {current_page} 页订阅数据，包含 {len(feed.items)} 个视频"
-                )
-                # 保存订阅数据到数据库
-                if db_manager.save_feed(feed):
-                    info(f"订阅数据已保存到数据库")
-                else:
-                    error(f"保存订阅数据到数据库失败")
 
-                # 保存订阅视频关联关系到数据库
-                if db_manager.save_feed_videos("default_feed", feed.items):
-                    info(f"订阅视频关联关系已保存到数据库")
-                else:
-                    error(f"保存订阅视频关联关系到数据库失败")
-
-                # 如果启用了下载功能，下载所有视频
-                process_and_download_videos(
-                    feed.filter_by_author_id("BhhLJPlVvjU"), db_manager, download_dir
-                )
-            else:
-                error(f"获取订阅数据失败，当前页面: {current_page}")
     except Exception as e:
         error(f"检查订阅更新时发生错误: {e}")
 
@@ -1271,7 +1221,7 @@ if __name__ == "__main__":
     config = Config()
     # 集合URL
     # collection_url = "https://api.memefans.ai/v2/posts/collections/BhhNPqDl_yW"
-    feed_url = "https://api.memefans.ai/v2/feed?page=1&size=50"
+    feed_url = "https://api.memefans.ai/v2/feed"
 
     info(f"M3U8视频下载工具启动")
     # print(f"集合URL: {collection_url}")
@@ -1310,10 +1260,11 @@ if __name__ == "__main__":
 
     # else:
     #     print("获取集合数据失败")
+    # update_all_videos(db_manager, feed_url,download_dir="./downloads",pages=3)
 
     # 开始定时检查订阅更新
     check_feed_updates(
-        feed_url, db_manager, not args.no_download, args.interval, "./downloads", num=20
+        feed_url, db_manager, not args.no_download, args.interval, "./downloads", num=30, page=1
     )
 
     # 保持主程序运行
