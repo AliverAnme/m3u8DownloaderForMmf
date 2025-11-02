@@ -952,77 +952,77 @@ def show_latest_videos(db_manager):
         error(f"显示最新视频信息时发生错误: {e}")
 
 
-# 定时检查集合更新并下载新增视频的函数
-def check_collection_updates(
-    collection_url,
-    db_manager,
-    download_flag=False,
-    interval=120,
-    download_dir="./downloads",
-):
-    try:
-        info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 开始检查集合更新...")
+# # 定时检查集合更新并下载新增视频的函数
+# def check_collection_updates(
+#     collection_url,
+#     db_manager,
+#     download_flag=False,
+#     interval=120,
+#     download_dir="./downloads",
+# ):
+#     try:
+#         info(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 开始检查集合更新...")
 
-        # 显示最新10条视频信息
-        show_latest_videos(db_manager)
+#         # 显示最新10条视频信息
+#         show_latest_videos(db_manager)
 
-        # 请求最新的集合数据
-        data = make_api_request(collection_url)
+#         # 请求最新的集合数据
+#         data = make_api_request(collection_url)
 
-        if data:
-            # 从JSON数据创建CollectionData实例
-            collection = CollectionData.from_json(data)
+#         if data:
+#             # 从JSON数据创建CollectionData实例
+#             collection = CollectionData.from_json(data)
 
-            # 提取当前集合的内容ID集合
-            current_contents = set(collection.contents)
+#             # 提取当前集合的内容ID集合
+#             current_contents = set(collection.contents)
 
-            # 从数据库获取上次保存的视频ID集合
-            saved_contents = db_manager.get_collection_videos_ids(collection.id)
+#             # 从数据库获取上次保存的视频ID集合
+#             saved_contents = db_manager.get_collection_videos_ids(collection.id)
 
-            # 如果数据库中没有保存过该集合的内容，或者集合内容为空，保存所有视频
-            # if not saved_contents:
-            info(f"集合包含 {len(current_contents)} 个视频")
+#             # 如果数据库中没有保存过该集合的内容，或者集合内容为空，保存所有视频
+#             # if not saved_contents:
+#             info(f"集合包含 {len(current_contents)} 个视频")
 
-            # 保存集合数据到数据库
-            if db_manager.save_collection(collection):
-                info(f"集合数据已保存到数据库")
-            else:
-                error(f"保存集合数据到数据库失败")
+#             # 保存集合数据到数据库
+#             if db_manager.save_collection(collection):
+#                 info(f"集合数据已保存到数据库")
+#             else:
+#                 error(f"保存集合数据到数据库失败")
 
-            # 保存集合视频关联关系到数据库
-            if db_manager.save_collection_videos(collection.id, collection.contents):
-                info(f"集合视频关联关系已保存到数据库")
-            else:
-                error(f"保存集合视频关联关系到数据库失败")
+#             # 保存集合视频关联关系到数据库
+#             if db_manager.save_collection_videos(collection.id, collection.contents):
+#                 info(f"集合视频关联关系已保存到数据库")
+#             else:
+#                 error(f"保存集合视频关联关系到数据库失败")
 
-            # 如果启用了下载功能，下载所有视频
-            process_and_download_videos(
-                collection.contents[:5], db_manager, download_dir
-            )
-        else:
-            error("获取集合数据失败")
-    except Exception as e:
-        error(f"检查集合更新时发生错误: {e}")
+#             # 如果启用了下载功能，下载所有视频
+#             process_and_download_videos(
+#                 collection.contents[:5], db_manager, download_dir
+#             )
+#         else:
+#             error("获取集合数据失败")
+#     except Exception as e:
+#         error(f"检查集合更新时发生错误: {e}")
 
-    try:
-        # 启动一个线程来显示实时倒计时
-        countdown_thread = threading.Thread(
-            target=show_live_countdown, args=(interval,)
-        )
-        countdown_thread.daemon = True  # 设置为守护线程，这样主线程结束时它也会结束
-        countdown_thread.start()
+#     try:
+#         # 启动一个线程来显示实时倒计时
+#         countdown_thread = threading.Thread(
+#             target=show_live_countdown, args=(interval,)
+#         )
+#         countdown_thread.daemon = True  # 设置为守护线程，这样主线程结束时它也会结束
+#         countdown_thread.start()
 
-        # interval秒后再次执行
-        timer = threading.Timer(
-            interval,
-            check_feed_updates,
-            args=[feed_url, db_manager, download_flag, interval],
-        )
-        timer.daemon = True  # 设置为守护线程
-        timer.start()
-    except Exception as e:
-        # 捕获线程创建过程中的异常
-        error(f"创建线程时发生错误: {e}")
+#         # interval秒后再次执行
+#         timer = threading.Timer(
+#             interval,
+#             check_feed_updates,
+#             args=[feed_url, db_manager, download_flag, interval],
+#         )
+#         timer.daemon = True  # 设置为守护线程
+#         timer.start()
+#     except Exception as e:
+#         # 捕获线程创建过程中的异常
+#         error(f"创建线程时发生错误: {e}")
 
 
 def check_feed_updates(

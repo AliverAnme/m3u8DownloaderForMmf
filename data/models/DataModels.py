@@ -71,11 +71,11 @@ class VideoRecord:
     uid: str = ''
     tags: List[str] = field(default_factory=list)
     upload_url: Optional[str] = None
-    binding_token_info: BindingTokenInfo = None
+    binding_token_info: BindingTokenInfo | None= None
     shoot_period: str = '0000'
     video_date: str = ''
 
-    
+
 @dataclass
 class CollectionData:
     """
@@ -114,7 +114,7 @@ class CollectionData:
         # 处理嵌套的author对象
         author_data = json_data.get('author')
         author = Author(**author_data) if author_data else None
-        
+
         # 创建并返回实例
         data_copy = json_data.copy()
         if author_data:
@@ -125,7 +125,7 @@ class CollectionData:
         field_names = {f.name for f in cls.__dataclass_fields__.values()}
         filtered_data = {k: v for k, v in data_copy.items() if k in field_names}
 
-        
+
         return cls(**filtered_data)
 
     def to_json(self) -> Dict[str, Any]:
@@ -134,20 +134,20 @@ class CollectionData:
         """
         return asdict(self)
 
-    def save_to_file(self, file_path: str = None) -> str:
+    def save_to_file(self, file_path: str | None = None) -> str:
         """
         保存数据到JSON文件
         """
         if not file_path:
             # 默认文件名使用集合ID
             file_path = f"collection_{self.id}.json"
-        
+
         # 确保目录存在
         os.makedirs(os.path.dirname(os.path.abspath(file_path)), exist_ok=True)
-        
+
         # 保存数据
         with open(file_path, 'w', encoding='utf-8') as f:
             json.dump(self.to_json(), f, ensure_ascii=False, indent=2)
-        
+
         return file_path
 
